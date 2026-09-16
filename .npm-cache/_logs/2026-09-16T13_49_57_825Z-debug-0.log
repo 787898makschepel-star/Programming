@@ -1,0 +1,23 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@10.9.3
+2 info using node@v22.18.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\78789\AppData\Local\Programs\Antigravity IDE\.npmrc
+5 silly config load:file:C:\Users\78789\.npmrc
+6 silly config load:file:C:\Users\78789\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm exec @upstash/context7-mcp
+8 verbose argv "exec" "--yes" "--" "@upstash/context7-mcp"
+9 verbose logfile logs-max:10 dir:C:\Users\78789\Programming\.npm-cache\_logs\2026-09-16T13_49_57_825Z-
+10 verbose logfile C:\Users\78789\Programming\.npm-cache\_logs\2026-09-16T13_49_57_825Z-debug-0.log
+11 silly logfile start cleaning logs, removing 5 files
+12 silly logfile done cleaning log files
+13 silly packumentCache heap:4345298944 maxSize:1086324736 maxEntrySize:543162368
+14 http fetch GET 200 https://registry.npmjs.org/@upstash%2fcontext7-mcp 304ms (cache revalidated)
+15 silly packumentCache heap:4345298944 maxSize:1086324736 maxEntrySize:543162368
+16 silly packumentCache heap:4345298944 maxSize:1086324736 maxEntrySize:543162368
+17 verbose cwd C:\Users\78789\AppData\Local\Programs\Antigravity IDE
+18 verbose os Windows_NT 10.0.26200
+19 verbose node v22.18.0
+20 verbose npm  v10.9.3
+21 verbose exit 1
+22 verbose code 1

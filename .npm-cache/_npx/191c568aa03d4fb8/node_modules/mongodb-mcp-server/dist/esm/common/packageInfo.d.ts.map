@@ -1,0 +1,1 @@
+{"version":3,"file":"packageInfo.d.ts","sourceRoot":"","sources":["../../../src/common/packageInfo.ts"],"names":[],"mappings":"AACA,eAAO,MAAM,WAAW,EAAE;IACtB,OAAO,EAAE,MAAM,CAAC;IAChB,aAAa,EAAE,MAAM,CAAC;IACtB,OAAO,EAAE;QAAE,IAAI,EAAE,MAAM,CAAA;KAAE,CAAC;CAO7B,CAAC"}

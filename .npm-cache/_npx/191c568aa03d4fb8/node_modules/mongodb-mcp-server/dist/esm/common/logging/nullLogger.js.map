@@ -1,0 +1,1 @@
+{"version":3,"file":"nullLogger.js","sourceRoot":"","sources":["../../../../src/common/logging/nullLogger.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,UAAU,EAAE,MAAM,iBAAiB,CAAC;AAE7C,MAAM,OAAO,UAAW,SAAQ,UAAU;IAGtC;QACI,KAAK,CAAC,SAAS,CAAC,CAAC;IACrB,CAAC;IAES,OAAO;QACb,sCAAsC;IAC1C,CAAC;CACJ"}
