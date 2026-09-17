@@ -167,6 +167,22 @@ def get_candy_by_idx(candy_idx: int) -> Dict[str, any]:
     return {"name": "Конфеты высшего сорта", "price": 1680, "image": None}
 
 
+def get_default_quantity_for_unit(unit: str) -> float:
+    """Стартовое количество в карточке смотри по типу единицы."""
+    if unit == "г":
+        return 0.5
+    if unit == "шт.":
+        return 3.0
+    return 1.0
+
+
+def format_quantity_label(qty: float, unit: str) -> str:
+    """Форматирует число для кнопки количества: 0.5г, 3шт, 1г."""
+    if unit == "г":
+        return f"{float(qty):g}г"
+    return f"{int(qty)}шт"
+
+
 def get_candies_assortment_kb(products=None) -> InlineKeyboardMarkup:
     """Точно 16 позиций ассортимента конфет и кнопка ⚡️ Назад."""
     builder = InlineKeyboardBuilder()
@@ -179,22 +195,24 @@ def get_candies_assortment_kb(products=None) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_candy_card_kb(candy_idx: int, qty: int = 1, price_per_piece: float = 1680.0, unit: str = "шт.") -> InlineKeyboardMarkup:
-    """Карточка выбранной конфеты точь-в-точь как на скриншоте пользователя."""
+def get_candy_card_kb(candy_idx: int, qty: float = 3.0, price_per_piece: float = 1680.0, unit: str = "шт.", base_quantity: float = 0.5) -> InlineKeyboardMarkup:
+    """Карточка выбранной конфеты с корректным стартовым количеством для граммов и штук."""
     builder = InlineKeyboardBuilder()
-    total_price = int(price_per_piece * qty)
-    quantity_label = f"{qty:.1f}г" if unit == "г" else f"{qty}шт"
+    base_quantity = base_quantity if unit == "г" else 3.0
+    if unit == "г":
+        total_price = round((price_per_piece / base_quantity) * qty)
+    else:
+        total_price = round(price_per_piece + ((qty - 3.0) * (price_per_piece / 3.0)))
+    quantity_label = format_quantity_label(qty, unit)
 
-    # Ряд 1: [ 3шт ]  [ + ]
     builder.row(
+        InlineKeyboardButton(text="−", callback_data=f"candy_minus_{candy_idx}_{qty}"),
         InlineKeyboardButton(text=quantity_label, callback_data=f"candy_qty_{candy_idx}_{qty}"),
         InlineKeyboardButton(text="+", callback_data=f"candy_plus_{candy_idx}_{qty}")
     )
-    # Ряд 2: [ ✅ Проверить наличие ]
     builder.row(
         InlineKeyboardButton(text="✅ Проверить наличие", callback_data=f"candy_stock_{candy_idx}")
     )
-    # Ряд 3: [ ⚡️ Назад ]  [ 🛒 Купить 5040₽ ]
     builder.row(
         InlineKeyboardButton(text="⚡️ Назад", callback_data="back_to_assortment"),
         InlineKeyboardButton(text=f"🛒 Купить {total_price}₽", callback_data=f"buy_candy_{candy_idx}_{qty}")
@@ -265,8 +283,14 @@ def get_balance_methods_kb() -> InlineKeyboardMarkup:
 
 
 def get_crypto_wallet_kb() -> InlineKeyboardMarkup:
-    """Кнопка возврата к выбору способов пополнения со скриншота."""
+    """Выбор сети в окне криптовалютных реквизитов."""
     builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔵 USDT TRC20", callback_data="topup_crypto_auto"))
+    builder.row(InlineKeyboardButton(text="🟡 USDT BEP20", callback_data="topup_manual_usdt_bep20"))
+    builder.row(InlineKeyboardButton(text="🟡 BNB BEP20", callback_data="topup_manual_bnb_bep20"))
+    builder.row(InlineKeyboardButton(text="₿ Bitcoin", callback_data="topup_manual_btc"))
+    builder.row(InlineKeyboardButton(text="💠 Ethereum ERC20", callback_data="topup_manual_eth"))
+    builder.row(InlineKeyboardButton(text="Ł Litecoin", callback_data="topup_manual_ltc"))
     builder.row(InlineKeyboardButton(text="⚡️ Назад", callback_data="client_profile"))
     return builder.as_markup()
 

@@ -95,6 +95,48 @@ async def show_crypto_screen(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
+MANUAL_CRYPTO_METHODS = {
+    "usdt_bep20": ("USDT BEP20", "USDT", "BEP20", "USDT_BEP20_WALLET"),
+    "bnb_bep20": ("BNB BEP20", "BNB", "BEP20", "BNB_BEP20_WALLET"),
+    "btc": ("Bitcoin", "BTC", "Bitcoin", "BTC_WALLET"),
+    "eth": ("Ethereum ERC20", "ETH", "ERC20", "ETH_ERC20_WALLET"),
+    "ltc": ("Litecoin", "LTC", "Litecoin", "LTC_WALLET"),
+}
+
+
+@router.callback_query(F.data.startswith("topup_manual_"))
+async def show_manual_crypto_screen(call: CallbackQuery, state: FSMContext):
+    """Показывает реквизиты выбранной сети для ручной проверки платежа."""
+    method_key = call.data.removeprefix("topup_manual_")
+    method = MANUAL_CRYPTO_METHODS.get(method_key)
+    if not method:
+        await call.answer("Способ оплаты временно недоступен.", show_alert=True)
+        return
+
+    title, currency, network, wallet_setting = method
+    wallet = getattr(config, wallet_setting)
+    await state.set_state(CryptoTxState.waiting_for_receipt)
+    caption = (
+        f"💳 <b>Пополнение через {title}</b>\n"
+        f"{DIVIDER}\n"
+        f"🌐 Сеть: <code>{network}</code>\n"
+        f"💰 Валюта: <code>{currency}</code>\n\n"
+        f"📋 <b>Адрес для перевода:</b>\n"
+        f"<code>{wallet}</code>\n\n"
+        f"Нажмите и удерживайте адрес, чтобы скопировать его.\n\n"
+        f"После перевода отправьте сюда фото/скриншот чека или сумму и TxID.\n"
+        f"Администратор проверит платеж и зачислит сумму на баланс."
+    )
+    await send_or_edit_screen(
+        call,
+        caption,
+        reply_markup=get_crypto_wallet_kb(),
+        photo=get_main_banner(),
+        state=state,
+    )
+    await call.answer()
+
+
 # ==========================================
 # МОИ ПОКУПКИ (ИСТОРИЯ ЗАКАЗОВ)
 # ==========================================

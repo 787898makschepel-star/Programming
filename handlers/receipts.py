@@ -101,6 +101,7 @@ def _build_receipt_card(
         )
         balance_line = f"💳 <b>Баланс:</b> <code>{user.balance:g} ₽</code>"
 
+    city_str = user.city or "—"
     card = (
         f"<b>{'─' * 24}</b>\n"
         f"<b>{header}</b>\n"
@@ -109,6 +110,7 @@ def _build_receipt_card(
         f"👤 <b>Клиент:</b> {user.full_name}\n"
         f"🔗 <b>Username:</b> {username_str}\n"
         f"🆔 <b>ID:</b> <code>{user.tg_id}</code>\n"
+        f"🏙️ <b>Город:</b> <code>{city_str}</code>\n"
         f"{balance_line}\n"
         f"💬 <b>Комментарий:</b> <code>{comment or '—'}</code>"
         f"{footer}"

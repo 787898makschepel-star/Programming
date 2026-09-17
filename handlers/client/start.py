@@ -23,10 +23,11 @@ from config import config
 router = Router(name="client_start")
 
 BANNER_PATH = "assets/main_banner.jpg"
+START_STICKER_ID = "CAACAgIAAxkBAAEHFCRqrGcwLKCbKyZpF__HJ9KnVhpwfAACMWoAAi38IEs5Qp_3NDiFkz0E"
 
 
 def get_main_banner() -> FSInputFile | None:
-    """Возвращает баннер с тюленем METH WAVE, если он существует."""
+    """Возвращает основной баннер приветствия."""
     if os.path.exists(BANNER_PATH):
         return FSInputFile(BANNER_PATH)
     return None
@@ -52,23 +53,37 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
     try:
         await bot.send_message(
             chat_id=message.chat.id,
-            text="🦭",
+            text="",
             reply_markup=get_bottom_reply_kb(db_user.tg_id in config.ADMIN_IDS)
         )
     except Exception:
         pass
 
+    try:
+        await bot.send_sticker(
+            chat_id=message.chat.id,
+            sticker=START_STICKER_ID,
+        )
+    except Exception:
+        pass
+
     banner = get_main_banner()
-    # Текст на баннере уже содержит приветствие, поэтому подпись лаконичная или пустая
-    caption = ""
-    await send_or_edit_screen(
-        event=message,
-        text=caption,
-        reply_markup=get_main_menu_kb(db_user),
-        photo=banner,
-        state=state,
-        bot=bot
-    )
+    if banner:
+        await bot.send_photo(
+            chat_id=message.chat.id,
+            photo=banner,
+            caption="🌊 <b>Главное меню</b>",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_kb(db_user),
+        )
+    else:
+        await bot.send_message(
+            chat_id=message.chat.id,
+            text="🌊 <b>Главное меню</b>",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_kb(db_user),
+            disable_web_page_preview=True,
+        )
 
 
 @router.callback_query(F.data == "to_main_menu")

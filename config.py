@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     """
     Класс конфигурации проекта. Загружает переменные из файла .env.
     """
-    BOT_TOKEN: str
+    BOT_TOKEN: str = ""
     ADMIN_IDS: List[int] = []
     DB_URL: str = "sqlite+aiosqlite:///data/bot.db"
     
@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     REVIEWS_CHANNEL: str = "@mwaves_reviews"
     FAQ_URL: str = "https://telegra.ph/FAQ-Mwaves-Shop"
     USDT_TRC20_WALLET: str = "TNxiKD9qpf3W3gygAgoj348ZM2wsJURe7U"
+    USDT_BEP20_WALLET: str = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
+    BNB_BEP20_WALLET: str = "0x52908400098527886E0F7030069857D2E4169EE7"
+    BTC_WALLET: str = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"
+    ETH_ERC20_WALLET: str = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
+    LTC_WALLET: str = "ltc1qg4n8f5k8z8j2m7w3s6r9p0v4c2x6y8t5d7f9a"
     
     RECEIPTS_GROUP_ID: int = -5458584510
     CRYPTO_BOT_TOKEN: str = ""

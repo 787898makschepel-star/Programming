@@ -83,7 +83,7 @@ class ShowcaseProduct(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(String(8), default="шт.", nullable=False)
-    start_quantity: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    start_quantity: Mapped[float] = mapped_column(Float, default=3.0, nullable=False)
     image_file_id: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

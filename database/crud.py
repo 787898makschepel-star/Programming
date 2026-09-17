@@ -20,6 +20,21 @@ from .models import (
 
 REFERRAL_RATE = 0.05
 
+
+def validate_showcase_minimum(unit: str, quantity: float) -> float:
+    """Проверяет и нормализует минимальный заказ витринного товара."""
+    if quantity <= 0:
+        raise ValueError("Минимальное количество должно быть положительным")
+    if unit == "г":
+        if quantity < 0.5 or quantity % 0.5 != 0:
+            raise ValueError("Минимум для граммов — 0.5 г с шагом 0.5")
+    elif unit == "шт.":
+        if quantity < 3 or not quantity.is_integer():
+            raise ValueError("Минимум для штук — 3 шт. или больше целым числом")
+    else:
+        raise ValueError("Неизвестная единица измерения")
+    return float(quantity)
+
 async def get_showcase_products(session: AsyncSession, include_inactive: bool = False) -> List[ShowcaseProduct]:
     query = select(ShowcaseProduct).options(selectinload(ShowcaseProduct.category)).order_by(ShowcaseProduct.id)
     if not include_inactive:
@@ -36,8 +51,17 @@ async def create_showcase_product(
     price: float,
     image_file_id: Optional[str],
     unit: str = "шт.",
-    start_quantity: float = 1.0
+    start_quantity: Optional[float] = None
 ) -> ShowcaseProduct:
+    if start_quantity is None:
+        if unit == "г":
+            start_quantity = 0.5
+        elif unit == "шт.":
+            start_quantity = 3.0
+        else:
+            start_quantity = 1.0
+    start_quantity = validate_showcase_minimum(unit, float(start_quantity))
+
     product = ShowcaseProduct(
         title=title,
         price=price,
@@ -73,7 +97,7 @@ async def update_showcase_product(
     if unit is not None:
         product.unit = unit
     if start_quantity is not None:
-        product.start_quantity = start_quantity
+        product.start_quantity = validate_showcase_minimum(product.unit, float(start_quantity))
     await session.commit()
     await session.refresh(product)
     return product

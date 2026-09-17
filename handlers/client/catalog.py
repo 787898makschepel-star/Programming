@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import config
 from database.models import User, ProductType, Order, OrderStatus, ShowcaseProduct
 from database.crud import (
     get_main_categories,
@@ -59,6 +60,100 @@ def get_candy_photo(candy_idx: int) -> FSInputFile | None:
 
 def get_showcase_photo(product: ShowcaseProduct) -> str | FSInputFile | None:
     return product.image_file_id or get_main_banner()
+
+
+def get_start_quantity_for_unit(unit: str) -> float:
+    """Главное правило: все карточки в граммах стартуют с 0.5 г, все штуки — с 3 шт."""
+    return 0.5 if unit == "г" else 3.0
+
+
+def get_minimum_quantity(product: ShowcaseProduct) -> float:
+    """Возвращает сохранённый минимум заказа с безопасным fallback для старых записей."""
+    minimum = float(product.start_quantity or 0)
+    if product.unit == "г":
+        return max(0.5, minimum)
+    return max(3.0, minimum)
+
+
+def calculate_showcase_total(base_price: float, base_quantity: float, quantity: float, unit: str) -> float:
+    """Рассчитывает стоимость витринного товара по правилам веса или упаковки."""
+    if base_price < 0 or base_quantity <= 0 or quantity <= 0:
+        raise ValueError("Цена и количество должны быть положительными")
+
+    if unit == "г":
+        if quantity % 0.5 != 0:
+            raise ValueError("Количество в граммах должно быть кратно 0.5")
+        return round((base_price / base_quantity) * quantity, 2)
+
+    minimum_quantity = 3
+    if quantity < minimum_quantity or quantity != int(quantity):
+        raise ValueError("Минимальное количество товара — 3 шт.")
+    return round(base_price + ((quantity - minimum_quantity) * (base_price / minimum_quantity)), 2)
+
+
+def build_waiting_for_coordinates_text(order_code: int, candy_name: str, qty_text: str, total_price: float, district: str) -> str:
+    """Красивое сообщение после оплаты с ожиданием координат выдачи."""
+    return (
+        f"✅ <b>Заказ #{order_code} оформлен</b>\n"
+        f"{DIVIDER}\n"
+        f"🍬 Товар: <b>{candy_name}</b> ({qty_text})\n"
+        f"📍 Район: <b>{district}</b>\n"
+        f"💵 Сумма: <code>{total_price:g} ₽</code>\n"
+        f"{DIVIDER}\n"
+        f"⏳ <b>Пожалуйста, подождите.</b>\n"
+        f"В течение нескольких минут мы пришлём вам координаты точки выдачи.\n"
+        f"Не закрывайте чат — уведомление придёт автоматически."
+    )
+
+
+def get_support_url() -> str:
+    support = config.SUPPORT_USERNAME.strip()
+    if support.startswith("@"):
+        return f"https://t.me/{support[1:]}"
+    return support
+
+
+def build_order_followup_text(order_code: int) -> str:
+    """Сообщение, если координаты не были отправлены вовремя."""
+    return (
+        f"⚠️ <b>Извините, что-то пошло не так.</b>\n\n"
+        f"Пожалуйста, пришлите оператору код заказа: <code>#{order_code}</code>"
+    )
+
+
+async def send_order_followup(bot: Bot, chat_id: int, order_code: int) -> None:
+    """Отправляет клиенту напоминание через 15 минут после оформления."""
+    await asyncio.sleep(15 * 60)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛟 Написать оператору", url=get_support_url())]
+    ])
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=build_order_followup_text(order_code),
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
+    except Exception:
+        return
+
+
+def build_admin_order_notification(order_code: int, user: User, candy_name: str, qty_text: str, city: str, district: str, total_price: float) -> str:
+    """Уведомление в админ-группу о новом заказе."""
+    username = f"@{user.username}" if user.username else f"TG:{user.tg_id}"
+    city_name = city or "—"
+    return (
+        f"✅ <b>Заказ #{order_code}</b> оформлен\n"
+        f"{DIVIDER}\n"
+        f"👤 <b>Клиент:</b> {username}\n"
+        f"🍬 <b>Товар:</b> {candy_name} ({qty_text})\n"
+        f"🏙️ <b>Город:</b> {city_name}\n"
+        f"📍 <b>Район:</b> {district}\n"
+        f"💵 <b>Сумма:</b> <code>{total_price:g} ₽</code>\n"
+        f"{DIVIDER}\n"
+        f"⏳ <b>Пожалуйста, подождите.</b>\n"
+        f"В течение нескольких минут мы пришлём вам координаты точки выдачи."
+    )
 
 
 # ==========================================
@@ -171,20 +266,19 @@ async def back_to_candies_assortment(call: CallbackQuery, session: AsyncSession,
 
 @router.callback_query(F.data.startswith("candy_plus_"))
 async def cb_candy_plus(call: CallbackQuery, session: AsyncSession):
-    """
-    Увеличение количества штук конфет (+1) и умножение цены на кнопке покупки.
-    """
+    """Увеличение количества товара по единице/половине грамма в зависимости от типа товара."""
     parts = call.data.split("_")
     candy_idx = int(parts[2])
-    qty = int(parts[3])
     candy = await get_showcase_product(session, candy_idx)
     if not candy:
         await call.answer("Товар больше недоступен.", show_alert=True)
         return
 
-    new_qty = min(qty + 1, 50)
+    qty = float(parts[3])
+    step = 0.5 if candy.unit == "г" else 1.0
+    new_qty = min(qty + step, 50.0)
     price_per_piece = candy.price
-    kb = get_candy_card_kb(candy_idx, qty=new_qty, price_per_piece=price_per_piece, unit=candy.unit)
+    kb = get_candy_card_kb(candy_idx, qty=new_qty, price_per_piece=price_per_piece, unit=candy.unit, base_quantity=get_minimum_quantity(candy))
 
     try:
         await call.message.edit_reply_markup(reply_markup=kb)
@@ -193,30 +287,32 @@ async def cb_candy_plus(call: CallbackQuery, session: AsyncSession):
     await call.answer()
 
 
-@router.callback_query(F.data.startswith("candy_qty_"))
+@router.callback_query(F.data.startswith("candy_qty_") | F.data.startswith("candy_minus_"))
 async def cb_candy_qty(call: CallbackQuery, session: AsyncSession):
-    """
-    Уменьшение количества (-1) при нажатии на кнопку количества.
-    """
+    """Уменьшает количество на 1 шт. или 0.5 г, но не ниже минимума."""
     parts = call.data.split("_")
     candy_idx = int(parts[2])
-    qty = int(parts[3])
     candy = await get_showcase_product(session, candy_idx)
     if not candy:
         await call.answer("Товар больше недоступен.", show_alert=True)
         return
 
-    if qty > 1:
-        new_qty = qty - 1
+    qty = float(parts[3])
+    step = 0.5 if candy.unit == "г" else 1.0
+    minimum = get_minimum_quantity(candy)
+
+    if qty - step >= minimum:
+        new_qty = round(qty - step, 2)
         price_per_piece = candy.price
-        kb = get_candy_card_kb(candy_idx, qty=new_qty, price_per_piece=price_per_piece, unit=candy.unit)
+        kb = get_candy_card_kb(candy_idx, qty=new_qty, price_per_piece=price_per_piece, unit=candy.unit, base_quantity=get_minimum_quantity(candy))
         try:
             await call.message.edit_reply_markup(reply_markup=kb)
         except Exception:
             pass
         await call.answer()
     else:
-        await call.answer("Минимальное количество для заказа — 1 шт.", show_alert=False)
+        message = "Минимальное количество для заказа — 0.5 г." if candy.unit == "г" else "Минимальное количество для заказа — 3 шт."
+        await call.answer(message, show_alert=False)
 
 
 @router.callback_query(F.data.startswith("candy_stock_"))
@@ -284,6 +380,8 @@ async def open_candy_detail(call: CallbackQuery, session: AsyncSession, db_user:
     candy_name = candy.title
     price = candy.price
 
+    initial_qty = get_minimum_quantity(candy)
+
     data = await state.get_data()
     district = data.get("current_district", "Западный")
     city = getattr(db_user, "city", "Москва") or "Москва"
@@ -294,7 +392,7 @@ async def open_candy_detail(call: CallbackQuery, session: AsyncSession, db_user:
     await send_or_edit_screen(
         event=call,
         text=caption,
-        reply_markup=get_candy_card_kb(candy_idx, qty=1, price_per_piece=price, unit=candy.unit),
+        reply_markup=get_candy_card_kb(candy_idx, qty=initial_qty, price_per_piece=price, unit=candy.unit, base_quantity=get_minimum_quantity(candy)),
         photo=photo,
         state=state
     )
@@ -302,29 +400,35 @@ async def open_candy_detail(call: CallbackQuery, session: AsyncSession, db_user:
 
 
 @router.callback_query(F.data.startswith("buy_candy_"))
-async def process_buy_candy(call: CallbackQuery, session: AsyncSession, db_user: User, state: FSMContext):
+async def process_buy_candy(call: CallbackQuery, session: AsyncSession, db_user: User, state: FSMContext, bot: Bot):
     """Оформление покупки конфет с баланса с учетом выбранного количества."""
     parts = call.data.split("_")
     candy_idx = int(parts[2])
-    qty = int(parts[3]) if len(parts) > 3 else 1
 
     candy = await get_showcase_product(session, candy_idx)
     if not candy or not candy.is_active:
         await call.answer("Товар больше недоступен.", show_alert=True)
         return
+
+    qty = float(parts[3]) if len(parts) > 3 else get_minimum_quantity(candy)
     candy_name = candy.title
-    price_per_piece = candy.price
-    total_price = float(price_per_piece * qty)
+    base_quantity = get_minimum_quantity(candy)
+    try:
+        total_price = calculate_showcase_total(candy.price, base_quantity, qty, candy.unit)
+    except ValueError as error:
+        await call.answer(str(error), show_alert=True)
+        return
 
     data = await state.get_data()
     district = data.get("current_district", "Западный")
 
     if db_user.balance < total_price:
         needed = round(total_price - db_user.balance, 2)
+        qty_text = f"{float(qty):g} г" if candy.unit == "г" else f"{int(qty)} шт."
         text = (
             f"❌ <b>Недостаточно средств на балансе</b>\n"
             f"{DIVIDER}\n"
-            f"🍬 Товар: <b>{candy_name}</b> ({qty} шт.)\n"
+            f"🍬 Товар: <b>{candy_name}</b> ({qty_text})\n"
             f"💵 Стоимость: <code>{total_price:g} ₽</code>\n"
             f"💰 Ваш баланс: <code>{db_user.balance:g} ₽</code>\n"
             f"Не хватает: <b>{needed:g} ₽</b>\n"
@@ -346,44 +450,73 @@ async def process_buy_candy(call: CallbackQuery, session: AsyncSession, db_user:
     await session.commit()
 
     import random
+    qty_text = f"{float(qty):g} г" if candy.unit == "г" else f"{int(qty)} шт."
     order = Order(
         user_id=db_user.id,
         product_id=None,
         amount=total_price,
         payment_method="balance",
         status=OrderStatus.COMPLETED,
-        delivered_data=f"{candy_name} ({qty} шт.)"
+        delivered_data=f"{candy_name} ({qty_text})"
     )
     session.add(order)
     await session.flush()
     await apply_referral_reward(session, order)
     await session.commit()
     order_id = order.id
+    order_code = random.randint(100000, 999999)
     pickup_code = f"WAVE-{order_id}-{random.randint(10, 99)}"
 
-    text = (
-        f"✅ <b>Заказ #{order_id} успешно оформлен!</b>\n"
-        f"{DIVIDER}\n"
-        f"🍬 Товар: <b>{candy_name}</b> ({qty} {candy.unit})\n"
-        f"📍 Район: <b>{district}</b>\n"
-        f"💵 Списано: <code>{total_price:g} ₽</code>\n"
-        f"💰 Остаток баланса: <code>{db_user.balance:g} ₽</code>\n"
-        f"{DIVIDER}\n"
-        f"🎁 <b>Код выдачи заказа:</b> <code>{pickup_code}</code>\n"
-        f"Спасибо за покупку в магазине METH WAVE!"
-    )
+    text = build_waiting_for_coordinates_text(order_code, candy_name, qty_text, total_price, district)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚡️ Назад в ассортимент", callback_data="back_to_assortment")],
         [InlineKeyboardButton(text="🌊 Главное меню", callback_data="to_main_menu")]
     ])
     photo = get_showcase_photo(candy)
+
+    short_status = (
+        "✅ Заказ оформлен\n\n"
+        "⏳ Пожалуйста, подождите\n\n"
+        "В течение нескольких минут мы пришлём вам координаты точки выдачи"
+    )
+
+    admin_text = build_admin_order_notification(order_code, db_user, candy_name, qty_text, db_user.city or "—", district, total_price)
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Удалить сообщение", callback_data=f"adm_delete_order_{order_code}")]
+    ])
+    try:
+        await bot.send_message(
+            chat_id=config.RECEIPTS_GROUP_ID,
+            text=admin_text,
+            reply_markup=admin_kb,
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
     await send_or_edit_screen(call, text, reply_markup=kb, photo=photo, state=state)
-    await call.answer("Заказ успешно оформлен!", show_alert=False)
+    await call.message.answer(short_status)
+    asyncio.create_task(send_order_followup(bot, db_user.tg_id, order_code))
+    await call.answer("Заказ оформлен.", show_alert=False)
 
 
 # ==========================================
 # КАТЕГОРИИ И ПОДКАТЕГОРИИ
 # ==========================================
+
+@router.callback_query(F.data.startswith("adm_delete_order_"))
+async def admin_delete_order_message(call: CallbackQuery):
+    """Удаляет сообщение в админ-группе о новом заказе."""
+    if call.from_user.id not in config.ADMIN_IDS:
+        await call.answer("⛔️ Нет прав.", show_alert=True)
+        return
+
+    try:
+        await call.message.delete()
+    except Exception:
+        pass
+    await call.answer("Сообщение удалено.", show_alert=False)
+
 
 @router.callback_query(F.data.startswith("cat_"))
 async def open_category(call: CallbackQuery, session: AsyncSession, db_user: User, state: FSMContext):
@@ -523,6 +656,7 @@ async def process_buy_product(call: CallbackQuery, session: AsyncSession, db_use
     else:
         await send_or_edit_screen(call, success_text, reply_markup=get_back_to_menu_kb(), photo=banner, state=state)
 
+    asyncio.create_task(send_order_followup(bot, db_user.tg_id, order.id))
     await call.answer("Покупка успешно совершена!", show_alert=False)
 
 

@@ -55,6 +55,8 @@ async def init_db():
                 await conn.execute(text("ALTER TABLE showcase_products ADD COLUMN unit VARCHAR(8) NOT NULL DEFAULT 'шт.'"))
             if showcase_columns and "start_quantity" not in showcase_columns:
                 await conn.execute(text("ALTER TABLE showcase_products ADD COLUMN start_quantity FLOAT NOT NULL DEFAULT 1"))
+            await conn.execute(text("UPDATE showcase_products SET start_quantity = 3 WHERE unit = 'шт.' AND (start_quantity IS NULL OR start_quantity < 3)"))
+            await conn.execute(text("UPDATE showcase_products SET start_quantity = 0.5 WHERE unit = 'г' AND (start_quantity IS NULL OR start_quantity < 0.5)"))
         elif conn.dialect.name == "postgresql":
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS district VARCHAR(64)"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id BIGINT"))
@@ -62,6 +64,8 @@ async def init_db():
             await conn.execute(text("ALTER TABLE showcase_products ADD COLUMN IF NOT EXISTS category_id BIGINT"))
             await conn.execute(text("ALTER TABLE showcase_products ADD COLUMN IF NOT EXISTS unit VARCHAR(8) NOT NULL DEFAULT 'шт.'"))
             await conn.execute(text("ALTER TABLE showcase_products ADD COLUMN IF NOT EXISTS start_quantity DOUBLE PRECISION NOT NULL DEFAULT 1"))
+            await conn.execute(text("UPDATE showcase_products SET start_quantity = 3 WHERE unit = 'шт.' AND (start_quantity IS NULL OR start_quantity < 3)"))
+            await conn.execute(text("UPDATE showcase_products SET start_quantity = 0.5 WHERE unit = 'г' AND (start_quantity IS NULL OR start_quantity < 0.5)"))
 
 
 async def get_session() -> AsyncSession:

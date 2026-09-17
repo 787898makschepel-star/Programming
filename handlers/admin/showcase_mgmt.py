@@ -8,6 +8,7 @@ from database.crud import (
     delete_showcase_product,
     get_showcase_product,
     get_showcase_products,
+    update_showcase_product,
 )
 from keyboards.inline_admin import (
     get_showcase_admin_kb,
@@ -82,13 +83,13 @@ async def start_edit_showcase(call: CallbackQuery, session: AsyncSession, state:
     )
     await send_or_edit_screen(
         call,
-        "✏️ <b>Редактирование товара</b>\n"
+        "✏️ <b>Редактирование карточки товара</b>\n"
         f"{DIVIDER}\n"
         f"Текущий товар: <b>{product.title}</b>\n"
         f"💵 Цена: <b>{product.price:g} ₽</b>\n"
         f"⚖️ Ед. изм.: <b>{product.unit}</b>\n"
-        f"🔢 Стартовое количество: <b>{product.start_quantity:g}</b>\n\n"
-        "Шаг 1 из 4. Введите новое название товара:",
+        f"🔢 Минимальный заказ: <b>{product.start_quantity:g} {product.unit}</b>\n\n"
+        "Шаг 1 из 5. Введите новое название товара:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❌ Отмена", callback_data="adm_showcase")]
         ]),
@@ -106,7 +107,7 @@ async def add_showcase_title(message: Message, state: FSMContext, bot):
         return
     await state.update_data(title=title)
     await state.set_state(ShowcaseProductState.waiting_for_price)
-    await send_or_edit_screen(message, "💵 <b>Шаг 2 из 4.</b> Введите цену за единицу:", state=state, bot=bot)
+    await send_or_edit_screen(message, "💵 <b>Шаг 2 из 5.</b> Введите цену минимального заказа:", state=state, bot=bot)
 
 
 @router.message(ShowcaseProductState.waiting_for_price)
@@ -124,7 +125,7 @@ async def add_showcase_price(message: Message, state: FSMContext, bot):
     await state.set_state(ShowcaseProductState.waiting_for_image)
     await send_or_edit_screen(
         message,
-        "🖼️ <b>Шаг 3 из 4.</b> Отправьте фотокарточку товара:",
+        "🖼️ <b>Шаг 3 из 5.</b> Отправьте фотокарточку товара:",
         state=state,
         bot=bot,
     )
@@ -137,7 +138,7 @@ async def add_showcase_image(message: Message, state: FSMContext, session: Async
     await state.set_state(ShowcaseProductState.waiting_for_unit)
     await send_or_edit_screen(
         message,
-        "⚖️ <b>Шаг 4 из 4.</b> Выберите единицу цены:\n"
+        "⚖️ <b>Шаг 4 из 5.</b> Выберите единицу цены:\n"
         "Укажите, за какую единицу указана введённая стоимость:",
         reply_markup=get_showcase_unit_kb(),
         state=state,
@@ -154,9 +155,9 @@ async def add_showcase_unit(call: CallbackQuery, state: FSMContext, session: Asy
     quantity_label = "грамм" if unit == "г" else "штук"
     await send_or_edit_screen(
         call,
-        f"🔢 <b>Стартовое количество</b>\n{DIVIDER}\n"
-        f"Введите стартовое количество в {quantity_label}:\n"
-        f"Например: <code>{'2.0' if unit == 'г' else '3'}</code>",
+        f"🔢 <b>Минимальное количество заказа</b>\n{DIVIDER}\n"
+        f"Введите минимальное количество в {quantity_label}:\n"
+        f"Например: <code>{'0.5' if unit == 'г' else '3'}</code>",
         state=state,
     )
     await call.answer(f"Выбрано: {unit}")
@@ -170,30 +171,30 @@ async def add_showcase_quantity(message: Message, state: FSMContext, session: As
     try:
         quantity = float(raw)
     except ValueError:
-        quantity_label = "грамм" if data.get("unit") == "г" else "целое количество штук"
+        quantity_label = "грамм, кратное 0.5" if data.get("unit") == "г" else "целое количество штук, минимум 3"
         example = "0.5" if data.get("unit") == "г" else "3"
         await send_or_edit_screen(
             message,
-            f"⚠️ Введите положительное значение ({quantity_label}), например: <code>{example}</code>.",
+            f"⚠️ Введите корректное минимальное количество ({quantity_label}), например: <code>{example}</code>.",
             state=state,
             bot=bot,
         )
         return
 
     if data.get("unit") == "г":
-        if not (0.001 <= quantity <= 500):
+        if not (0.5 <= quantity <= 500) or quantity % 0.5 != 0:
             await send_or_edit_screen(
                 message,
-                "⚠️ Для граммов введите значение от <b>0.001</b> до <b>500</b> грамм.",
+                "⚠️ Для граммов введите значение от <b>0.5</b> до <b>500</b> грамм с шагом <b>0.5</b>.",
                 state=state,
                 bot=bot,
             )
             return
     else:
-        if quantity <= 0 or not quantity.is_integer():
+        if quantity < 3 or not quantity.is_integer():
             await send_or_edit_screen(
                 message,
-                "⚠️ Для штук введите положительное целое число, например: <code>3</code>.",
+                "⚠️ Для штук минимальный заказ — целое число не менее <b>3</b>.",
                 state=state,
                 bot=bot,
             )
@@ -229,7 +230,7 @@ async def add_showcase_quantity(message: Message, state: FSMContext, session: As
         f"{success_title}\n{DIVIDER}\n"
         f"🏷 {product.title}\n"
         f"💵 {product.price:g} ₽\n"
-        f"🔢 Стартовое количество: <b>{quantity_text} {product.unit}</b>\n"
+        f"🔢 Минимальный заказ: <b>{quantity_text} {product.unit}</b>\n"
         "🖼️ Фотокарточка сохранена.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="➕ Добавить товар ещё", callback_data="adm_showcase_add")],
