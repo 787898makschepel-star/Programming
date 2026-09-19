@@ -131,7 +131,7 @@ def get_product_types_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_user_manage_kb(user_id: int, is_banned: bool) -> InlineKeyboardMarkup:
+def get_user_manage_kb(user_id: int, is_banned: bool, is_admin: bool = False) -> InlineKeyboardMarkup:
     """Кнопки управления найденным пользователем."""
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -142,6 +142,12 @@ def get_user_manage_kb(user_id: int, is_banned: bool) -> InlineKeyboardMarkup:
     ban_action = "unban" if is_banned else "ban"
     builder.row(
         InlineKeyboardButton(text=ban_text, callback_data=f"adm_{ban_action}_{user_id}")
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="✅ Уже администратор" if is_admin else "👑 Сделать админом",
+            callback_data=f"adm_make_admin_{user_id}" if not is_admin else "adm_admin_already"
+        )
     )
     builder.row(
         InlineKeyboardButton(text="🔙 К поиску", callback_data="adm_users")

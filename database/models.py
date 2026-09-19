@@ -48,6 +48,7 @@ class User(Base):
     referral_earnings: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     used_promos: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     orders: Mapped[List["Order"]] = relationship("Order", back_populates="user", cascade="all, delete-orphan")

@@ -9,6 +9,7 @@ from database.crud import (
     get_user_by_username,
     update_user_balance,
     set_user_ban_status,
+    set_user_admin_status,
     get_user_orders
 )
 from keyboards.inline_admin import get_user_manage_kb
@@ -66,7 +67,7 @@ async def process_user_search(message: Message, state: FSMContext, session: Asyn
     await send_or_edit_screen(
         message,
         card_text,
-        reply_markup=get_user_manage_kb(user.tg_id, user.is_banned),
+        reply_markup=get_user_manage_kb(user.tg_id, user.is_banned, user.is_admin),
         state=state,
         bot=bot
     )
@@ -81,7 +82,7 @@ async def process_ban_user(call: CallbackQuery, session: AsyncSession):
         await call.answer("Пользователь заблокирован!", show_alert=True)
         orders = await get_user_orders(session, user.id, limit=100)
         card_text = format_admin_user_card(user, len(orders))
-        await call.message.edit_text(card_text, parse_mode="HTML", reply_markup=get_user_manage_kb(user.tg_id, is_banned=True))
+        await call.message.edit_text(card_text, parse_mode="HTML", reply_markup=get_user_manage_kb(user.tg_id, is_banned=True, is_admin=user.is_admin))
 
 
 @router.callback_query(F.data.startswith("adm_unban_"))
@@ -93,7 +94,30 @@ async def process_unban_user(call: CallbackQuery, session: AsyncSession):
         await call.answer("Пользователь разблокирован!", show_alert=True)
         orders = await get_user_orders(session, user.id, limit=100)
         card_text = format_admin_user_card(user, len(orders))
-        await call.message.edit_text(card_text, parse_mode="HTML", reply_markup=get_user_manage_kb(user.tg_id, is_banned=False))
+        await call.message.edit_text(card_text, parse_mode="HTML", reply_markup=get_user_manage_kb(user.tg_id, is_banned=False, is_admin=user.is_admin))
+
+
+@router.callback_query(F.data.startswith("adm_make_admin_"))
+async def process_make_admin(call: CallbackQuery, session: AsyncSession):
+    """Назначить найденного пользователя администратором бота."""
+    tg_id = int(call.data.removeprefix("adm_make_admin_"))
+    user = await set_user_admin_status(session, tg_id)
+    if not user:
+        await call.answer("Пользователь не найден.", show_alert=True)
+        return
+    await call.answer("Права администратора выданы.", show_alert=True)
+    orders = await get_user_orders(session, user.id, limit=100)
+    card_text = format_admin_user_card(user, len(orders))
+    await call.message.edit_text(
+        card_text,
+        parse_mode="HTML",
+        reply_markup=get_user_manage_kb(user.tg_id, user.is_banned, user.is_admin),
+    )
+
+
+@router.callback_query(F.data == "adm_admin_already")
+async def admin_already(call: CallbackQuery):
+    await call.answer("Пользователь уже является администратором.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("adm_bal_add_"))
@@ -151,6 +175,6 @@ async def process_balance_change(message: Message, state: FSMContext, session: A
             f"Успешно {action_word} <code>{amount:g} ₽</code>.\n\n"
             f"{card_text}"
         )
-        await send_or_edit_screen(message, res_text, reply_markup=get_user_manage_kb(user.tg_id, user.is_banned), state=state, bot=bot)
+        await send_or_edit_screen(message, res_text, reply_markup=get_user_manage_kb(user.tg_id, user.is_banned, user.is_admin), state=state, bot=bot)
     else:
         await send_or_edit_screen(message, "Ошибка: пользователь не найден.", state=state, bot=bot)

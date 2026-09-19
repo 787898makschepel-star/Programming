@@ -23,6 +23,7 @@ from database.crud import (
     get_transaction_by_id,
     approve_receipt_transaction,
     reject_receipt_transaction,
+    get_user_by_tg_id,
 )
 from states.client_states import CryptoTxState
 from states.admin_states import AdminReceiptState
@@ -277,7 +278,8 @@ async def handle_user_receipt_submission(
 @router.callback_query(F.data.startswith("rcpt_rej_"))
 async def cb_admin_reject_receipt(call: CallbackQuery, session: AsyncSession, bot: Bot):
     """Отклоняет чек — обновляет карточку в группе, уведомляет пользователя."""
-    if call.from_user.id not in config.ADMIN_IDS:
+    admin_user = await get_user_by_tg_id(session, call.from_user.id)
+    if call.from_user.id not in config.ADMIN_IDS and not (admin_user and admin_user.is_admin):
         await call.answer("⛔️ Нет прав.", show_alert=True)
         return
 
@@ -345,7 +347,8 @@ async def cb_admin_approve_click(call: CallbackQuery, session: AsyncSession, sta
     Нажатие «Подтвердить»: бот отправляет в группу короткий промпт-реплай
     и ждёт следующего сообщения от этого администратора.
     """
-    if call.from_user.id not in config.ADMIN_IDS:
+    admin_user = await get_user_by_tg_id(session, call.from_user.id)
+    if call.from_user.id not in config.ADMIN_IDS and not (admin_user and admin_user.is_admin):
         await call.answer("⛔️ Нет прав.", show_alert=True)
         return
 

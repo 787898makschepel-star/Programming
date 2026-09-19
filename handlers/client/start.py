@@ -11,14 +11,12 @@ from keyboards.inline_client import (
     get_main_menu_kb,
     get_city_select_kb,
     get_districts_kb,
-    get_bottom_reply_kb,
     get_back_to_menu_kb,
     CITY_DISTRICTS
 )
 from states.client_states import PromoState
 from utils.ui_cleaner import send_or_edit_screen, delete_user_message
 from utils.formatters import format_faq, DIVIDER
-from config import config
 
 router = Router(name="client_start")
 
@@ -48,16 +46,6 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
         payload = message.text.split(maxsplit=1)[1].strip() if len(message.text.split(maxsplit=1)) > 1 else ""
         if payload.startswith("ref") and payload[3:].isdigit():
             await attach_referrer(session, db_user, int(payload[3:]))
-
-    # Отправляем закрепляемую нижнюю кнопку
-    try:
-        await bot.send_message(
-            chat_id=message.chat.id,
-            text="",
-            reply_markup=get_bottom_reply_kb(db_user.tg_id in config.ADMIN_IDS)
-        )
-    except Exception:
-        pass
 
     try:
         await bot.send_sticker(
@@ -103,7 +91,7 @@ async def cb_main_menu(call: CallbackQuery, db_user: User, state: FSMContext, bo
 
 
 # ==========================================
-# ВЫБОР ГОРОДА (💦 Город (Москва))
+# ВЫБОР ГОРОДА (📍 Город (Москва))
 # ==========================================
 
 @router.callback_query(F.data == "client_city")
@@ -111,7 +99,7 @@ async def show_city_selection(call: CallbackQuery, db_user: User, state: FSMCont
     """Выбор текущего города."""
     current_city = getattr(db_user, "city", "") or "не выбран"
     text = (
-        f"💦 <b>Выбор вашего города</b>\n"
+        f"📍 <b>Выбор вашего города</b>\n"
         f"{DIVIDER}\n"
         f"Текущий выбранный город: <b>{current_city}</b>\n\n"
         f"Выберите город, чтобы затем указать район для заказа:"
@@ -123,6 +111,10 @@ async def show_city_selection(call: CallbackQuery, db_user: User, state: FSMCont
 @router.callback_query(F.data.startswith("set_city_"))
 async def process_city_choice(call: CallbackQuery, session: AsyncSession, db_user: User, state: FSMContext):
     """Сохраняет город и показывает районы только этого города."""
+    if call.data is None:
+        await call.answer("Не удалось определить город.", show_alert=True)
+        return
+
     new_city = call.data.replace("set_city_", "")
     if new_city not in CITY_DISTRICTS:
         await call.answer("Город временно недоступен.", show_alert=True)
@@ -159,7 +151,7 @@ async def start_promo_input(call: CallbackQuery, state: FSMContext):
         f"🎁 <b>Активация промокода</b>\n"
         f"{DIVIDER}\n"
         f"Введите промокод в поле ввода сообщением.\n\n"
-        f"💡 <i>Подсказка: на приветственном баннере действует промокод</i> <code>#METHWAVE</code> <i>на 300₽!</i>"
+        f"💡 <i>Подсказка: на приветственном баннере действует промокод</i> <code>#WILLIWONKA</code> <i>на 300₽!</i>"
     )
     cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Отмена", callback_data="to_main_menu")]
@@ -171,20 +163,35 @@ async def start_promo_input(call: CallbackQuery, state: FSMContext):
 @router.message(PromoState.waiting_for_code)
 async def process_promo_code(message: Message, state: FSMContext, session: AsyncSession, db_user: User, bot: Bot):
     """Обработка ввода промокода."""
+    if message.text is None:
+        await send_or_edit_screen(
+            message,
+            "❌ <b>Неверный формат промокода</b>\n"
+            f"{DIVIDER}\n"
+            "Введите промокод текстом.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🏠 В главное меню", callback_data="to_main_menu")]
+            ]),
+            state=state,
+            bot=bot,
+        )
+        await state.clear()
+        return
+
     code = message.text.strip().upper().replace("#", "")
     await delete_user_message(message)
 
     used = db_user.used_promos.split(",") if db_user.used_promos else []
 
-    if code == "METHWAVE":
-        if "METHWAVE" in used:
+    if code == "WILLIWONKA":
+        if "WILLIWONKA" in used:
             text = (
                 f"⚠️ <b>Промокод уже был активирован</b>\n"
                 f"{DIVIDER}\n"
-                f"Вы уже получали 300₽ по промокоду <code>#METHWAVE</code>."
+                f"Вы уже получали 300₽ по промокоду <code>#WILLIWONKA</code>."
             )
         else:
-            used.append("METHWAVE")
+            used.append("WILLIWONKA")
             db_user.used_promos = ",".join(used)
             db_user.balance = round(db_user.balance + 300.0, 2)
             await session.commit()
@@ -195,7 +202,7 @@ async def process_promo_code(message: Message, state: FSMContext, session: Async
                 f"{DIVIDER}\n"
                 f"💰 На ваш баланс зачислено: <b>+300 ₽</b>\n"
                 f"💳 Текущий баланс: <b>{db_user.balance:g} ₽</b>\n\n"
-                f"Приятных покупок в магазине METH WAVE!"
+                f"Приятных покупок в магазине WILLI WONKA!"
             )
     else:
         text = (
@@ -204,11 +211,11 @@ async def process_promo_code(message: Message, state: FSMContext, session: Async
             f"Промокод не найден или срок его действия истек."
         )
 
-    await state.clear()
     cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏠 В главное меню", callback_data="to_main_menu")]
     ])
     await send_or_edit_screen(message, text, reply_markup=cancel_kb, state=state, bot=bot)
+    await state.clear()
 
 
 # ==========================================

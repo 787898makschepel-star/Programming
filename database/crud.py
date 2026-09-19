@@ -149,7 +149,8 @@ async def get_or_create_user(
         referrer_id=None,
         referral_earnings=0.0,
         used_promos="",
-        is_banned=False
+        is_banned=False,
+        is_admin=False
     )
     session.add(new_user)
     await session.commit()
@@ -223,6 +224,17 @@ async def set_user_ban_status(session: AsyncSession, tg_id: int, is_banned: bool
     if not user:
         return None
     user.is_banned = is_banned
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def set_user_admin_status(session: AsyncSession, tg_id: int, is_admin: bool = True) -> Optional[User]:
+    """Установить или снять права администратора у пользователя."""
+    user = await get_user_by_tg_id(session, tg_id)
+    if not user:
+        return None
+    user.is_admin = is_admin
     await session.commit()
     await session.refresh(user)
     return user

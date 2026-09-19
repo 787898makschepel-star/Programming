@@ -46,6 +46,8 @@ async def init_db():
                 await conn.execute(text("ALTER TABLE users ADD COLUMN referrer_id INTEGER"))
             if "referral_earnings" not in column_names:
                 await conn.execute(text("ALTER TABLE users ADD COLUMN referral_earnings FLOAT NOT NULL DEFAULT 0"))
+            if "is_admin" not in column_names:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
             showcase_columns = {
                 row[1] for row in await conn.execute(text("PRAGMA table_info(showcase_products)"))
             }
@@ -61,6 +63,7 @@ async def init_db():
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS district VARCHAR(64)"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id BIGINT"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_earnings DOUBLE PRECISION NOT NULL DEFAULT 0"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
             await conn.execute(text("ALTER TABLE showcase_products ADD COLUMN IF NOT EXISTS category_id BIGINT"))
             await conn.execute(text("ALTER TABLE showcase_products ADD COLUMN IF NOT EXISTS unit VARCHAR(8) NOT NULL DEFAULT 'шт.'"))
             await conn.execute(text("ALTER TABLE showcase_products ADD COLUMN IF NOT EXISTS start_quantity DOUBLE PRECISION NOT NULL DEFAULT 1"))

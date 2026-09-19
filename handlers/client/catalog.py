@@ -17,6 +17,7 @@ from database.crud import (
     get_product_stock,
     buy_product_atomic,
     apply_referral_reward,
+    get_user_by_tg_id,
     get_showcase_products,
     get_showcase_product
 )
@@ -433,7 +434,7 @@ async def process_buy_candy(call: CallbackQuery, session: AsyncSession, db_user:
             f"💰 Ваш баланс: <code>{db_user.balance:g} ₽</code>\n"
             f"Не хватает: <b>{needed:g} ₽</b>\n"
             f"{DIVIDER}\n"
-            f"Пополните баланс в разделе профиля или активируйте промокод #METHWAVE:"
+            f"Пополните баланс в разделе профиля или активируйте промокод #WILLIWONKA:"
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="client_profile")],
@@ -505,9 +506,10 @@ async def process_buy_candy(call: CallbackQuery, session: AsyncSession, db_user:
 # ==========================================
 
 @router.callback_query(F.data.startswith("adm_delete_order_"))
-async def admin_delete_order_message(call: CallbackQuery):
+async def admin_delete_order_message(call: CallbackQuery, session: AsyncSession):
     """Удаляет сообщение в админ-группе о новом заказе."""
-    if call.from_user.id not in config.ADMIN_IDS:
+    db_user = await get_user_by_tg_id(session, call.from_user.id)
+    if call.from_user.id not in config.ADMIN_IDS and not (db_user and db_user.is_admin):
         await call.answer("⛔️ Нет прав.", show_alert=True)
         return
 

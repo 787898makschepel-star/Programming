@@ -83,19 +83,16 @@ def get_main_menu_kb(user: Optional[User] = None) -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text=f"💰 Баланс ({balance_val}₽)", callback_data="client_profile"))
     # 3. 🛒 Мои покупки
     builder.row(InlineKeyboardButton(text="🛒 Мои покупки", callback_data="profile_orders"))
-    # 4. 💦 Город (Москва)
-    builder.row(InlineKeyboardButton(text=f"💦 Город ({city})", callback_data="client_city"))
+    # 4. 📍 Город (Москва)
+    builder.row(InlineKeyboardButton(text=f"📍 Город ({city})", callback_data="client_city"))
     # 5. 🎁 Промокод
     builder.row(InlineKeyboardButton(text="🎁 Промокод", callback_data="client_promo"))
     # 6. 🤝 Пригласи друга
     builder.row(InlineKeyboardButton(text="🤝 Пригласи друга", callback_data="client_ref"))
 
-    reviews_url = f"https://t.me/{config.REVIEWS_CHANNEL.lstrip('@')}" if config.REVIEWS_CHANNEL.startswith("@") else config.REVIEWS_CHANNEL
     support_url = f"https://t.me/{config.SUPPORT_USERNAME.lstrip('@')}" if config.SUPPORT_USERNAME.startswith("@") else config.SUPPORT_USERNAME
 
-    # 7. 💠 Отзывы ↗
-    builder.row(InlineKeyboardButton(text="💠 Отзывы ↗", url=reviews_url))
-    # 8. 🛟 Тех. Поддержка ↗
+    # 7. 🛟 Тех. Поддержка ↗
     builder.row(InlineKeyboardButton(text="🛟 Тех. Поддержка ↗", url=support_url))
 
     return builder.as_markup()
@@ -114,8 +111,8 @@ def get_city_select_kb() -> InlineKeyboardMarkup:
 def get_districts_kb(city: str = "") -> InlineKeyboardMarkup:
     """
     Точная копия экрана районов со скриншота пользователя:
-    💦 Центральный
-    💦 Северный
+    📍 Центральный
+    📍 Северный
     ...
     ⚡️ Назад
     """
@@ -128,7 +125,7 @@ def get_districts_kb(city: str = "") -> InlineKeyboardMarkup:
     for district_index, district in enumerate(districts):
         builder.row(
             InlineKeyboardButton(
-                text=f"💦 {district}",
+                text=f"📍 {district}",
                 callback_data=f"dist_{city_code}_{district_index}"
             )
         )
@@ -287,10 +284,7 @@ def get_crypto_wallet_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🔵 USDT TRC20", callback_data="topup_crypto_auto"))
     builder.row(InlineKeyboardButton(text="🟡 USDT BEP20", callback_data="topup_manual_usdt_bep20"))
-    builder.row(InlineKeyboardButton(text="🟡 BNB BEP20", callback_data="topup_manual_bnb_bep20"))
-    builder.row(InlineKeyboardButton(text="₿ Bitcoin", callback_data="topup_manual_btc"))
     builder.row(InlineKeyboardButton(text="💠 Ethereum ERC20", callback_data="topup_manual_eth"))
-    builder.row(InlineKeyboardButton(text="Ł Litecoin", callback_data="topup_manual_ltc"))
     builder.row(InlineKeyboardButton(text="⚡️ Назад", callback_data="client_profile"))
     return builder.as_markup()
 
