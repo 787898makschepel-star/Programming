@@ -1,7 +1,16 @@
 from typing import List
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton as TelegramInlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.models import Category, Product
+from config import config
+from utils.button_settings import registered_buttons, resolve_button
+
+
+def InlineKeyboardButton(*, text: str, **kwargs):
+    _, text, emoji_id = resolve_button(text, scope="admin", **kwargs)
+    if emoji_id:
+        kwargs.setdefault("icon_custom_emoji_id", emoji_id)
+    return TelegramInlineKeyboardButton(text=text, **kwargs)
 
 
 def get_admin_main_kb() -> InlineKeyboardMarkup:
@@ -65,11 +74,40 @@ def get_admin_settings_kb() -> InlineKeyboardMarkup:
     """Меню просмотра настроек бота для администратора."""
     builder = InlineKeyboardBuilder()
     builder.row(
+        InlineKeyboardButton(text="🎭 Изменить стартовый стикер", callback_data="adm_change_start_sticker")
+    )
+    builder.row(
+        InlineKeyboardButton(text="✏️ Редактировать кнопки", callback_data="adm_edit_buttons")
+    )
+    builder.row(
         InlineKeyboardButton(text="🔄 Обновить настройки", callback_data="adm_settings")
     )
     builder.row(
         InlineKeyboardButton(text="🔙 В админку", callback_data="adm_main")
     )
+    return builder.as_markup()
+
+
+def get_button_editor_kb(page: int = 0) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    buttons = registered_buttons("main_menu")
+    page_size = 8
+    start = max(page, 0) * page_size
+    for index, _, label in buttons[start:start + page_size]:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"✏️ {label[:40] if len(label) > 40 else label}",
+                callback_data=f"adm_button_edit_{index}"
+            )
+        )
+    navigation = []
+    if page > 0:
+        navigation.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_button_page_{page - 1}"))
+    if start + page_size < len(buttons):
+        navigation.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"adm_button_page_{page + 1}"))
+    if navigation:
+        builder.row(*navigation)
+    builder.row(InlineKeyboardButton(text="🔙 К настройкам", callback_data="adm_settings"))
     return builder.as_markup()
 
 

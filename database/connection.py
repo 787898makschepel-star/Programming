@@ -1,8 +1,10 @@
 from sqlalchemy import text
 import os
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 from config import config
+
+CITY_RESET_MIGRATION_ID = "2026_09_reset_user_cities"
 
 # Если используется локальный SQLite, убедимся что папка для файла БД существует
 if config.DB_URL.startswith("sqlite"):
@@ -31,6 +33,22 @@ class Base(DeclarativeBase):
     pass
 
 
+async def _apply_city_reset_migration(conn: AsyncConnection) -> None:
+    await conn.execute(text(
+        "CREATE TABLE IF NOT EXISTS bot_migrations ("
+        "migration_id VARCHAR(128) PRIMARY KEY)"
+    ))
+    migration = await conn.execute(
+        text(
+            "INSERT INTO bot_migrations (migration_id) VALUES (:migration_id) "
+            "ON CONFLICT (migration_id) DO NOTHING"
+        ),
+        {"migration_id": CITY_RESET_MIGRATION_ID},
+    )
+    if migration.rowcount:
+        await conn.execute(text("UPDATE users SET city = '', district = NULL"))
+
+
 async def init_db():
     """
     Инициализация базы данных: создание всех таблиц, если они не существуют.
@@ -48,6 +66,12 @@ async def init_db():
                 await conn.execute(text("ALTER TABLE users ADD COLUMN referral_earnings FLOAT NOT NULL DEFAULT 0"))
             if "is_admin" not in column_names:
                 await conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
+            if "start_count" not in column_names:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN start_count INTEGER NOT NULL DEFAULT 0"))
+            if "start_pending" not in column_names:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN start_pending BOOLEAN NOT NULL DEFAULT 0"))
+            if "captcha_passed" not in column_names:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN captcha_passed BOOLEAN NOT NULL DEFAULT 0"))
             showcase_columns = {
                 row[1] for row in await conn.execute(text("PRAGMA table_info(showcase_products)"))
             }
@@ -64,11 +88,16 @@ async def init_db():
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id BIGINT"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_earnings DOUBLE PRECISION NOT NULL DEFAULT 0"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS start_count INTEGER NOT NULL DEFAULT 0"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS start_pending BOOLEAN NOT NULL DEFAULT FALSE"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS captcha_passed BOOLEAN NOT NULL DEFAULT FALSE"))
             await conn.execute(text("ALTER TABLE showcase_products ADD COLUMN IF NOT EXISTS category_id BIGINT"))
             await conn.execute(text("ALTER TABLE showcase_products ADD COLUMN IF NOT EXISTS unit VARCHAR(8) NOT NULL DEFAULT 'шт.'"))
             await conn.execute(text("ALTER TABLE showcase_products ADD COLUMN IF NOT EXISTS start_quantity DOUBLE PRECISION NOT NULL DEFAULT 1"))
             await conn.execute(text("UPDATE showcase_products SET start_quantity = 3 WHERE unit = 'шт.' AND (start_quantity IS NULL OR start_quantity < 3)"))
             await conn.execute(text("UPDATE showcase_products SET start_quantity = 0.5 WHERE unit = 'г' AND (start_quantity IS NULL OR start_quantity < 0.5)"))
+
+        await _apply_city_reset_migration(conn)
 
 
 async def get_session() -> AsyncSession:

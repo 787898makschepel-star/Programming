@@ -10,9 +10,14 @@ class Settings(BaseSettings):
     Класс конфигурации проекта. Загружает переменные из файла .env.
     """
     BOT_TOKEN: str = ""
+    BOT_TOKEN_2: str = ""
     ADMIN_IDS: List[int] = []
     DB_URL: str = "sqlite+aiosqlite:///data/bot.db"
     
+    START_STICKER_ID: str = "CAACAgIAAxkBAAEHFCRqrGcwLKCbKyZpF__HJ9KnVhpwfAACMWoAAi38IEs5Qp_3NDiFkz0E"
+    BUTTON_EMOJI_ID: str = "5404573776253825754"
+    BUTTON_LABELS: str = "{}"
+    BUTTON_EMOJI_IDS: str = "{}"
     SUPPORT_USERNAME: str = "@williwonka_operator"
     REVIEWS_CHANNEL: str = "@mwaves_reviews"
     FAQ_URL: str = "https://telegra.ph/FAQ-Mwaves-Shop"

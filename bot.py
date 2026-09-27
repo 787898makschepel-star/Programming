@@ -50,43 +50,34 @@ async def on_startup(bot: Bot):
 
 async def on_shutdown(bot: Bot):
     """Корректное завершение работы сервисов при остановке."""
-    logger.info("Остановка бота и закрытие сессий...")
-    await async_engine.dispose()
+    logger.info("Остановка бота и закрытие сессии...")
     await bot.session.close()
-    logger.info("Бот успешно остановлен.")
 
 
 async def main():
     """Точка входа в приложение."""
-    # Инициализация бота
-    bot = Bot(
-        token=config.BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-    )
+    tokens = [token for token in (config.BOT_TOKEN, config.BOT_TOKEN_2) if token]
+    if not tokens:
+        raise ValueError("Не задан BOT_TOKEN или BOT_TOKEN_2")
 
-    # Диспетчер и хранилище состояний FSM
+    bots = [Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML)) for token in tokens]
     dp = Dispatcher(storage=MemoryStorage())
-
-    # Регистрация глобальных Middleware
     dp.update.middleware(DbSessionMiddleware(session_factory=async_session_factory))
     dp.message.middleware(UserTrackerMiddleware())
     dp.callback_query.middleware(UserTrackerMiddleware())
-
-    # Подключение роутеров
     dp.include_router(main_router)
-
-    # Хуки жизненного цикла
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
 
-    # Сброс накопившихся апдейтов перед запуском
-    await bot.delete_webhook(drop_pending_updates=True)
-
-    logger.info("Запуск long-polling...")
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        for bot in bots:
+            await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Запуск long-polling для %s ботов...", len(bots))
+        await dp.start_polling(*bots, allowed_updates=dp.resolve_used_update_types())
     finally:
-        await bot.session.close()
+        for bot in bots:
+            await bot.session.close()
+        await async_engine.dispose()
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.crud import get_analytics_stats, get_top_products
 from keyboards.inline_admin import get_stats_period_kb
+from utils.callback_parser import parse_callback_suffix
 from utils.ui_cleaner import send_or_edit_screen
 from utils.formatters import format_admin_stats, DIVIDER
 
@@ -26,7 +27,11 @@ async def show_stats_menu(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("stat_"))
 async def show_stats_period(call: CallbackQuery, session: AsyncSession, state: FSMContext):
     """Отображение показателей за выбранный период в том же окне."""
-    period_code = call.data.replace("stat_", "")
+    period_code = parse_callback_suffix(call.data, "stat_")
+    if not period_code:
+        await call.answer("Не удалось определить период статистики.", show_alert=True)
+        return
+
     period_titles = {
         "today": "за сегодня",
         "week": "за 7 дней",

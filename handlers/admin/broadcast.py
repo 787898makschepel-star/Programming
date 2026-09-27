@@ -1,6 +1,7 @@
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
+from keyboards.inline_admin import InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.crud import get_all_user_tg_ids

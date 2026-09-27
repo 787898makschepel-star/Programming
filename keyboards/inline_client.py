@@ -1,13 +1,21 @@
 from typing import List, Optional, Dict
 from aiogram.types import (
     InlineKeyboardMarkup,
-    InlineKeyboardButton,
+    InlineKeyboardButton as TelegramInlineKeyboardButton,
     ReplyKeyboardMarkup,
     KeyboardButton
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.models import Category, Product, Order, User
 from config import config
+from utils.button_settings import resolve_button, resolve_reply_button
+
+
+def InlineKeyboardButton(*, text: str, scope: str = "client", **kwargs):
+    _, text, emoji_id = resolve_button(text, scope=scope, **kwargs)
+    if emoji_id:
+        kwargs.setdefault("icon_custom_emoji_id", emoji_id)
+    return TelegramInlineKeyboardButton(text=text, **kwargs)
 
 CITY_DISTRICTS: Dict[str, List[str]] = {
     "Москва": [
@@ -54,11 +62,30 @@ CITY_DISTRICTS: Dict[str, List[str]] = {
 CITY_CODES = {city: index for index, city in enumerate(CITY_DISTRICTS)}
 
 
+def get_game_reply_kb() -> ReplyKeyboardMarkup:
+    """Возвращает игровую Reply-клавиатуру из двух рядов."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🌊 Главное меню")],
+            [
+                KeyboardButton(text="🛟 Тех. Поддержка"),
+                KeyboardButton(text="💸 Работа без залога"),
+            ],
+        ],
+        resize_keyboard=True,
+        persistent=True,
+    )
+
+
 def get_bottom_reply_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
     """Нижняя постоянная панель с дополнительной кнопкой админ-команды."""
-    keyboard = [[KeyboardButton(text="🌊 Главное меню")]]
+    main_label, emoji_id = resolve_reply_button("main_menu", "🌊 Главное меню", "main_menu")
+    button_kwargs = {"icon_custom_emoji_id": emoji_id} if emoji_id else {}
+    keyboard = [[KeyboardButton(text=main_label, **button_kwargs)]]
     if is_admin:
-        keyboard.append([KeyboardButton(text="/admin")])
+        admin_label, admin_emoji_id = resolve_reply_button("admin", "/admin")
+        admin_kwargs = {"icon_custom_emoji_id": admin_emoji_id} if admin_emoji_id else {}
+        keyboard.append([KeyboardButton(text=admin_label, **admin_kwargs)])
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
         resize_keyboard=True,
@@ -77,23 +104,25 @@ def get_main_menu_kb(user: Optional[User] = None) -> InlineKeyboardMarkup:
         b = user.balance
         balance_val = int(b) if b.is_integer() else round(b, 2)
 
-    # 1. 🌊 Каталог
-    builder.row(InlineKeyboardButton(text="🌊 Каталог", callback_data="client_catalog"))
-    # 2. 💰 Баланс (0₽)
-    builder.row(InlineKeyboardButton(text=f"💰 Баланс ({balance_val}₽)", callback_data="client_profile"))
-    # 3. 🛒 Мои покупки
-    builder.row(InlineKeyboardButton(text="🛒 Мои покупки", callback_data="profile_orders"))
-    # 4. 📍 Город (Москва)
-    builder.row(InlineKeyboardButton(text=f"📍 Город ({city})", callback_data="client_city"))
-    # 5. 🎁 Промокод
-    builder.row(InlineKeyboardButton(text="🎁 Промокод", callback_data="client_promo"))
-    # 6. 🤝 Пригласи друга
-    builder.row(InlineKeyboardButton(text="🤝 Пригласи друга", callback_data="client_ref"))
+    # 1. 🌊 Каталог (одна кнопка)
+    builder.row(InlineKeyboardButton(text="🌊 Каталог", callback_data="client_catalog", scope="main_menu"))
+    # 2. 💰 Баланс + 🛒 Покупки (две кнопки в ряд)
+    builder.row(
+        InlineKeyboardButton(text=f"💰 Баланс ({balance_val}₽)", callback_data="client_profile", scope="main_menu"),
+        InlineKeyboardButton(text="🛒 Мои покупки", callback_data="profile_orders", scope="main_menu")
+    )
+    # 3. 📍 Город (одна кнопка)
+    builder.row(InlineKeyboardButton(text=f"📍 Город ({city})", callback_data="client_city", scope="main_menu"))
+    # 4. 🎁 Промокод + 🤝 Реферал (две кнопки в ряд)
+    builder.row(
+        InlineKeyboardButton(text="🎁 Промокод", callback_data="client_promo", scope="main_menu"),
+        InlineKeyboardButton(text="🤝 Пригласи друга", callback_data="client_ref", scope="main_menu")
+    )
 
     support_url = f"https://t.me/{config.SUPPORT_USERNAME.lstrip('@')}" if config.SUPPORT_USERNAME.startswith("@") else config.SUPPORT_USERNAME
 
     # 7. 🛟 Тех. Поддержка ↗
-    builder.row(InlineKeyboardButton(text="🛟 Тех. Поддержка ↗", url=support_url))
+    builder.row(InlineKeyboardButton(text="🛟 Тех. Поддержка ↗", url=support_url, scope="main_menu"))
 
     return builder.as_markup()
 

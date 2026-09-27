@@ -4,7 +4,6 @@ from aiogram.types import (
     Message,
     PreCheckoutQuery,
     InlineKeyboardMarkup,
-    InlineKeyboardButton,
     LabeledPrice
 )
 from aiogram.fsm.context import FSMContext
@@ -19,10 +18,11 @@ from database.crud import (
 )
 from services.telegram_stars import TelegramStarsService
 from services.cryptobot import CryptoBotService
-from keyboards.inline_client import get_back_to_menu_kb
+from keyboards.inline_client import get_back_to_menu_kb, InlineKeyboardButton
 from utils.ui_cleaner import send_or_edit_screen
 from utils.formatters import DIVIDER
 from config import config
+from utils.callback_parser import parse_callback_int, parse_callback_suffix
 
 router = Router(name="payments_router")
 
@@ -34,7 +34,11 @@ router = Router(name="payments_router")
 @router.callback_query(F.data.startswith("topup_stars_"))
 async def start_stars_payment(call: CallbackQuery, bot: Bot, session: AsyncSession, db_user: User):
     """Выставление счета в Telegram Stars."""
-    amount_rub = float(call.data.split("_")[2])
+    amount_rub = parse_callback_int(call.data, "topup_stars_")
+    if amount_rub is None:
+        await call.answer("Некорректная сумма пополнения.", show_alert=True)
+        return
+    amount_rub = float(amount_rub)
     stars_amount = max(1, int(amount_rub))
 
     tx = await create_transaction(
@@ -76,7 +80,7 @@ async def process_successful_payment(message: Message, session: AsyncSession, db
                 f"🎉 <b>Баланс успешно пополнен!</b>\n"
                 f"{DIVIDER}\n"
                 f"💰 Зачислено: <code>+{tx.amount:g} ₽</code>\n"
-                f"💳 Текущий баланс: <code>{db_user.balance:g} ₽</code>\n\n"
+                f"💳 Текущий баланс: <code>{tx.user.balance:g} ₽</code>\n\n"
                 f"<i>Вы можете перейти в каталог и оформить заказ.</i>"
             )
             await send_or_edit_screen(message, text, reply_markup=get_back_to_menu_kb(), state=state, bot=bot)
@@ -95,7 +99,11 @@ async def process_successful_payment(message: Message, session: AsyncSession, db
 @router.callback_query(F.data.startswith("topup_crypto_"))
 async def start_crypto_payment(call: CallbackQuery, session: AsyncSession, db_user: User, state: FSMContext):
     """Создание инвойса через CryptoBot в Single-Screen окне."""
-    amount_rub = float(call.data.split("_")[2])
+    amount_rub = parse_callback_int(call.data, "topup_crypto_")
+    if amount_rub is None:
+        await call.answer("Некорректная сумма пополнения.", show_alert=True)
+        return
+    amount_rub = float(amount_rub)
 
     if not config.CRYPTO_BOT_TOKEN:
         text = (
@@ -152,19 +160,30 @@ async def start_crypto_payment(call: CallbackQuery, session: AsyncSession, db_us
 @router.callback_query(F.data.startswith("check_crypto_"))
 async def check_crypto_status(call: CallbackQuery, session: AsyncSession, state: FSMContext):
     """Проверка оплаты инвойса CryptoBot."""
-    parts = call.data.split("_")
-    tx_id = int(parts[2])
-    invoice_id = parts[3]
+    suffix = parse_callback_suffix(call.data, "check_crypto_")
+    if not suffix:
+        await call.answer("Не удалось определить счет для проверки.", show_alert=True)
+        return
+    parts = suffix.split("_")
+    if len(parts) < 2 or not parts[0].isdigit():
+        await call.answer("Не удалось определить счет для проверки.", show_alert=True)
+        return
+    tx_id = int(parts[0])
+    invoice_id = parts[1]
 
     crypto_service = CryptoBotService()
     is_paid = await crypto_service.verify_payment(invoice_id)
 
     if is_paid:
         tx = await complete_transaction(session, tx_id)
+        if not tx:
+            await call.answer("Транзакция не найдена.", show_alert=True)
+            return
         text = (
             f"🎉 <b>Платеж подтвержден!</b>\n"
             f"{DIVIDER}\n"
             f"💰 Зачислено: <code>+{tx.amount:g} ₽</code>\n"
+            f"💳 Текущий баланс: <code>{tx.user.balance:g} ₽</code>\n"
             f"Спасибо за пополнение баланса!"
         )
         await send_or_edit_screen(call, text, reply_markup=get_back_to_menu_kb(), state=state)
@@ -180,7 +199,11 @@ async def check_crypto_status(call: CallbackQuery, session: AsyncSession, state:
 @router.callback_query(F.data.startswith("topup_card_"))
 async def start_card_payment(call: CallbackQuery, bot: Bot, session: AsyncSession, db_user: User, state: FSMContext):
     """Оплата банковской картой."""
-    amount_rub = float(call.data.split("_")[2])
+    amount_rub = parse_callback_int(call.data, "topup_card_")
+    if amount_rub is None:
+        await call.answer("Некорректная сумма пополнения.", show_alert=True)
+        return
+    amount_rub = float(amount_rub)
 
     if not config.TELEGRAM_PAYMENT_PROVIDER_TOKEN:
         text = (

@@ -1,7 +1,8 @@
 import os
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, FSInputFile
 from aiogram.fsm.context import FSMContext
+from keyboards.inline_client import InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import User, ProductType
@@ -16,6 +17,7 @@ from states.client_states import CryptoTxState
 from utils.ui_cleaner import send_or_edit_screen, delete_user_message
 from utils.formatters import format_order_details, DIVIDER
 from config import config
+from utils.callback_parser import parse_callback_suffix, parse_callback_int
 
 router = Router(name="client_profile")
 
@@ -107,7 +109,11 @@ MANUAL_CRYPTO_METHODS = {
 @router.callback_query(F.data.startswith("topup_manual_"))
 async def show_manual_crypto_screen(call: CallbackQuery, state: FSMContext):
     """Показывает реквизиты выбранной сети для ручной проверки платежа."""
-    method_key = call.data.removeprefix("topup_manual_")
+    method_key = parse_callback_suffix(call.data, "topup_manual_")
+    if not method_key:
+        await call.answer("Способ оплаты временно недоступен.", show_alert=True)
+        return
+
     method = MANUAL_CRYPTO_METHODS.get(method_key)
     if not method:
         await call.answer("Способ оплаты временно недоступен.", show_alert=True)
@@ -169,7 +175,11 @@ async def show_orders_history(call: CallbackQuery, session: AsyncSession, db_use
 @router.callback_query(F.data.startswith("view_order_"))
 async def view_single_order(call: CallbackQuery, session: AsyncSession, bot: Bot, state: FSMContext):
     """Просмотр конкретного заказа."""
-    order_id = int(call.data.split("_")[2])
+    order_id = parse_callback_int(call.data, "view_order_")
+    if order_id is None:
+        await call.answer("Заказ не найден.", show_alert=True)
+        return
+
     order = await get_order_by_id(session, order_id)
 
     if not order:

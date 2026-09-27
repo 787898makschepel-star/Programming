@@ -1,6 +1,7 @@
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.fsm.context import FSMContext
+from keyboards.inline_admin import InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.crud import (
@@ -16,6 +17,7 @@ from keyboards.inline_admin import (
     get_showcase_unit_kb,
 )
 from states.admin_states import ShowcaseProductState
+from utils.callback_parser import parse_callback_int
 from utils.formatters import DIVIDER
 from utils.ui_cleaner import delete_user_message, send_or_edit_screen
 
@@ -65,7 +67,10 @@ async def start_add_showcase(call: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("adm_showcase_edit_"))
 async def start_edit_showcase(call: CallbackQuery, session: AsyncSession, state: FSMContext):
-    product_id = int(call.data.rsplit("_", 1)[1])
+    product_id = parse_callback_int(call.data, "adm_showcase_edit_")
+    if product_id is None:
+        await call.answer("Товар не найден.", show_alert=True)
+        return
     product = await get_showcase_product(session, product_id)
     if not product:
         await call.answer("Товар не найден.", show_alert=True)
@@ -250,7 +255,10 @@ async def add_showcase_image_required(message: Message, state: FSMContext, bot):
 
 @router.callback_query(F.data.startswith("adm_showcase_del_"))
 async def ask_delete_showcase(call: CallbackQuery, session: AsyncSession, state: FSMContext):
-    product_id = int(call.data.rsplit("_", 1)[1])
+    product_id = parse_callback_int(call.data, "adm_showcase_del_")
+    if product_id is None:
+        await call.answer("Товар не найден.", show_alert=True)
+        return
     product = await get_showcase_product(session, product_id)
     if not product:
         await call.answer("Товар не найден.", show_alert=True)
@@ -266,7 +274,10 @@ async def ask_delete_showcase(call: CallbackQuery, session: AsyncSession, state:
 
 @router.callback_query(F.data.startswith("adm_showcase_confirm_del_"))
 async def confirm_delete_showcase(call: CallbackQuery, session: AsyncSession, state: FSMContext):
-    product_id = int(call.data.rsplit("_", 1)[1])
+    product_id = parse_callback_int(call.data, "adm_showcase_confirm_del_")
+    if product_id is None:
+        await call.answer("Товар не найден.", show_alert=True)
+        return
     deleted = await delete_showcase_product(session, product_id)
     await call.answer("Товар удалён." if deleted else "Товар уже удалён.", show_alert=True)
     await show_showcase_screen(call, session, state)

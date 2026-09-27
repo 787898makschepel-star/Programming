@@ -17,6 +17,11 @@ class PromoState(StatesGroup):
     waiting_for_code = State()
 
 
+class CityState(StatesGroup):
+    """FSM выбора города вручную."""
+    waiting_for_city = State()
+
+
 class CryptoTxState(StatesGroup):
     """FSM ожидания чека или хэша транзакции USDT TRC20."""
     waiting_for_tx_hash = State()

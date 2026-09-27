@@ -45,6 +45,16 @@ class BroadcastState(StatesGroup):
     waiting_for_confirmation = State()
 
 
+class ChangeStartStickerState(StatesGroup):
+    """FSM смены стартового стикера администратором."""
+    waiting_for_sticker = State()
+
+
+class EditButtonState(StatesGroup):
+    """FSM редактирования подписи и emoji кнопки администратором."""
+    waiting_for_settings = State()
+
+
 class AdminReceiptState(StatesGroup):
     """FSM ожидания суммы в рублях от администратора для чека."""
     waiting_for_amount = State()

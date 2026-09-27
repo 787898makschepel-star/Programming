@@ -1,27 +1,40 @@
 import os
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, FSInputFile, ForceReply, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import config
 from database.models import User
 from database.crud import update_user_balance, attach_referrer, get_referral_stats
 from keyboards.inline_client import (
     get_main_menu_kb,
-    get_city_select_kb,
+    get_game_reply_kb,
     get_districts_kb,
     get_back_to_menu_kb,
-    CITY_DISTRICTS
+    CITY_DISTRICTS,
+    InlineKeyboardButton
 )
-from states.client_states import PromoState
+from utils.callback_parser import parse_callback_suffix
+from states.client_states import CityState, PromoState
 from utils.ui_cleaner import send_or_edit_screen, delete_user_message
 from utils.formatters import format_faq, DIVIDER
+from handlers.emoji_captcha import send_start_captcha
 
 router = Router(name="client_start")
 
 BANNER_PATH = "assets/main_banner.jpg"
-START_STICKER_ID = "CAACAgIAAxkBAAEHFCRqrGcwLKCbKyZpF__HJ9KnVhpwfAACMWoAAi38IEs5Qp_3NDiFkz0E"
+CITY_ALIASES = {
+    "ростов": "Ростов-на-Дону",
+    "питер": "Санкт-Петербург",
+}
+
+
+def get_start_sticker_id() -> str:
+    """Возвращает текущий стартовый стикер из настроек бота."""
+    value = getattr(config, "START_STICKER_ID", "") or "CAACAgIAAxkBAAEHFCRqrGcwLKCbKyZpF__HJ9KnVhpwfAACMWoAAi38IEs5Qp_3NDiFkz0E"
+    return value.strip() or "CAACAgIAAxkBAAEHFCRqrGcwLKCbKyZpF__HJ9KnVhpwfAACMWoAAi38IEs5Qp_3NDiFkz0E"
 
 
 def get_main_banner() -> FSInputFile | None:
@@ -39,21 +52,68 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
     - Отправляет постоянную кнопку '🌊 Главное меню' внизу.
     - Выводит фирменный баннер METH WAVE с тюленем и кнопками.
     """
+    start_text = message.text or ""
+    is_start_command = start_text.startswith("/start")
+    if is_start_command:
+        db_user.start_count += 1
+        db_user.captcha_passed = False
+        if not db_user.start_pending:
+            db_user.start_pending = True
+            await session.commit()
+            return
+
+        db_user.start_pending = False
+        await session.commit()
+
+    if not db_user.captcha_passed:
+        if not is_start_command:
+            return
+        await state.clear()
+        await delete_user_message(message)
+        await send_start_captcha(bot, message.chat.id, db_user)
+        return
+
+    if not db_user.city:
+        await delete_user_message(message)
+        await state.clear()
+        await state.set_state(CityState.waiting_for_city)
+        await state.update_data(onboarding_after_captcha=True)
+        await bot.send_message(
+            chat_id=message.chat.id,
+            text=(
+                f"📍 <b>Укажите город</b>\n{DIVIDER}\n"
+                "Напишите свой город, чтобы продолжить."
+            ),
+            parse_mode="HTML",
+            reply_markup=ForceReply(
+                input_field_placeholder="Напишите свой город",
+                selective=True,
+            ),
+        )
+        return
+
     await delete_user_message(message)
     await state.clear()
 
-    if message.text and message.text.startswith("/start"):
-        payload = message.text.split(maxsplit=1)[1].strip() if len(message.text.split(maxsplit=1)) > 1 else ""
+    if is_start_command:
+        payload = start_text.split(maxsplit=1)[1].strip() if len(start_text.split(maxsplit=1)) > 1 else ""
         if payload.startswith("ref") and payload[3:].isdigit():
             await attach_referrer(session, db_user, int(payload[3:]))
 
     try:
         await bot.send_sticker(
             chat_id=message.chat.id,
-            sticker=START_STICKER_ID,
+            sticker=get_start_sticker_id(),
+            reply_markup=get_game_reply_kb(),
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger = __import__("logging").getLogger(__name__)
+        logger.debug("Failed to send startup sticker: %s", exc)
+        await bot.send_message(
+            chat_id=message.chat.id,
+            text="🌊",
+            reply_markup=get_game_reply_kb(),
+        )
 
     banner = get_main_banner()
     if banner:
@@ -72,6 +132,61 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
             reply_markup=get_main_menu_kb(db_user),
             disable_web_page_preview=True,
         )
+
+
+@router.message(F.text.in_({"🛟 Тех. Поддержка", "💸 Работа без залога"}))
+async def handle_game_reply_button(message: Message):
+    """Обрабатывает нажатия кнопок игровой клавиатуры."""
+    if message.text == "🛟 Тех. Поддержка":
+        support_username = str(getattr(config, "SUPPORT_USERNAME", "") or "").strip()
+        if support_username.startswith(("https://t.me/", "http://t.me/")):
+            support_url = support_username
+        else:
+            support_url = f"https://t.me/{support_username.lstrip('@')}" if support_username else "https://t.me/"
+        await message.answer(
+            "🛟 Напишите в техподдержку:",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Открыть поддержку", url=support_url)]
+                ]
+            ),
+        )
+        return
+
+    support_username = str(getattr(config, "SUPPORT_USERNAME", "") or "").strip()
+    if support_username.startswith(("https://t.me/", "http://t.me/")):
+        support_url = support_username
+    else:
+        support_url = f"https://t.me/{support_username.lstrip('@')}" if support_username else "https://t.me/"
+
+    support_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💬 Написать в техподдержку",
+                    url=support_url,
+                )
+            ]
+        ]
+    )
+
+    await message.answer(
+        """Работа с нами. Требуются люди готовые качественно работать и хорошо зарабатывать.
+
+💁‍♀️ Лучшие условия у нас
+
+1. Свободный график работы
+2. Выплата зарплаты еженедельно
+3. В день до 5 часов Вашего времени
+4. Высокий уровень оплаты труда от 700 $ в неделю
+5. Полная подготовка к работе, опыт и пол не важен
+
+💦 Условия трудоустройства
+
+1. Устройство по внесению залога.
+2. Наработка на залог граффити либо стикерами""",
+        reply_markup=support_keyboard,
+    )
 
 
 @router.callback_query(F.data == "to_main_menu")
@@ -96,26 +211,116 @@ async def cb_main_menu(call: CallbackQuery, db_user: User, state: FSMContext, bo
 
 @router.callback_query(F.data == "client_city")
 async def show_city_selection(call: CallbackQuery, db_user: User, state: FSMContext):
-    """Выбор текущего города."""
+    """Запрашивает город текстом перед открытием каталога."""
     current_city = getattr(db_user, "city", "") or "не выбран"
+    await state.set_state(CityState.waiting_for_city)
+    if not db_user.city:
+        await state.update_data(onboarding_after_captcha=True)
+    await call.answer("Напишите город для выбора ассортимента.", show_alert=True)
     text = (
         f"📍 <b>Выбор вашего города</b>\n"
         f"{DIVIDER}\n"
         f"Текущий выбранный город: <b>{current_city}</b>\n\n"
-        f"Выберите город, чтобы затем указать район для заказа:"
+        "Напишите город сообщением, чтобы выбрать ассортимент:"
     )
-    await send_or_edit_screen(call, text, reply_markup=get_city_select_kb(), state=state)
-    await call.answer()
+    await send_or_edit_screen(
+        event=call,
+        text=text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="to_main_menu")]
+        ]),
+        state=state,
+    )
+
+
+@router.message(CityState.waiting_for_city)
+async def process_city_input(message: Message, session: AsyncSession, db_user: User, state: FSMContext, bot: Bot):
+    """Сохраняет город из списка, введенный пользователем вручную."""
+    city_input = (message.text or "").strip()
+    city_by_normalized_name = {
+        city.casefold(): city
+        for city in CITY_DISTRICTS
+    }
+    city_by_normalized_name.update(
+        {alias: city for alias, city in CITY_ALIASES.items()}
+    )
+    city = city_by_normalized_name.get(city_input.casefold())
+
+    await delete_user_message(message)
+
+    if city is None:
+        await send_or_edit_screen(
+            event=message,
+            text=(
+                "❌ <b>Город не найден</b>\n"
+                f"{DIVIDER}\n"
+                "Напишите город точно как в списке доступных городов."
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="to_main_menu")]
+            ]),
+            state=state,
+            bot=bot,
+        )
+        return
+
+    db_user.city = city
+    db_user.district = None
+    await session.commit()
+    await session.refresh(db_user)
+
+    state_data = await state.get_data()
+    if state_data.get("onboarding_after_captcha"):
+        await state.update_data(onboarding_after_captcha=False)
+        try:
+            await bot.send_sticker(
+                chat_id=message.chat.id,
+                sticker=get_start_sticker_id(),
+                reply_markup=get_game_reply_kb(),
+            )
+        except Exception as exc:
+            logger = __import__("logging").getLogger(__name__)
+            logger.debug("Failed to send startup sticker after city selection: %s", exc)
+            await bot.send_message(
+                chat_id=message.chat.id,
+                text="🌊",
+                reply_markup=get_game_reply_kb(),
+            )
+        await send_or_edit_screen(
+            event=message,
+            text="🌊 <b>Главное меню</b>",
+            reply_markup=get_main_menu_kb(db_user),
+            photo=get_main_banner(),
+            state=state,
+            bot=bot,
+        )
+        await state.set_state(None)
+        return
+
+    await state.clear()
+
+    await send_or_edit_screen(
+        event=message,
+        text=(
+            f"📍 <b>{city}</b>\n"
+            f"{DIVIDER}\n"
+            "Теперь выберите район, в котором будет оформляться заказ:"
+        ),
+        reply_markup=get_districts_kb(city),
+        photo=get_main_banner(),
+        state=state,
+        bot=bot,
+    )
 
 
 @router.callback_query(F.data.startswith("set_city_"))
 async def process_city_choice(call: CallbackQuery, session: AsyncSession, db_user: User, state: FSMContext):
     """Сохраняет город и показывает районы только этого города."""
-    if call.data is None:
+    new_city = parse_callback_suffix(call.data, "set_city_")
+    if not new_city:
         await call.answer("Не удалось определить город.", show_alert=True)
         return
 
-    new_city = call.data.replace("set_city_", "")
     if new_city not in CITY_DISTRICTS:
         await call.answer("Город временно недоступен.", show_alert=True)
         return

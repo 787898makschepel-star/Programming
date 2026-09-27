@@ -2,8 +2,9 @@ import asyncio
 import os
 import random
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, FSInputFile
 from aiogram.fsm.context import FSMContext
+from keyboards.inline_client import InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import config
@@ -17,7 +18,6 @@ from database.crud import (
     get_product_stock,
     buy_product_atomic,
     apply_referral_reward,
-    get_user_by_tg_id,
     get_showcase_products,
     get_showcase_product
 )
@@ -37,6 +37,7 @@ from keyboards.inline_client import (
 )
 from utils.ui_cleaner import send_or_edit_screen
 from utils.formatters import format_product_card, format_purchase_success, DIVIDER
+from utils.callback_parser import split_callback_suffix, parse_callback_int, parse_callback_suffix
 
 router = Router(name="client_catalog")
 
@@ -166,7 +167,7 @@ async def show_catalog_districts(call: CallbackQuery, session: AsyncSession, db_
     """
     Экран районов города точь-в-точь со скриншота:
     - Тот же баннер с тюленем на месте.
-    - Подпись: '🌊 Каталог • Москва'
+    - Подпись: '🍬 Каталог • Москва'
     - Кнопки районов: Центральный, Северный, ..., ⚡️ Назад
     """
     await state.clear()
@@ -188,7 +189,7 @@ async def show_catalog_districts(call: CallbackQuery, session: AsyncSession, db_
         )
         await call.answer()
         return
-    caption = f"🌊 Каталог • {city}"
+    caption = f"🍬 Каталог • {city}"
     banner = get_main_banner()
 
     await send_or_edit_screen(
@@ -211,14 +212,14 @@ async def open_district_catalog(call: CallbackQuery, session: AsyncSession, db_u
     Вход в район: отображение экрана с 16 позициями ассортимента конфет со скриншота
     и кнопкой '⚡️ Назад'.
     """
-    parts = call.data.split("_")
-    if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
+    parts = split_callback_suffix(call.data, "dist_")
+    if not parts or len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
         await call.answer("Не удалось определить район. Откройте каталог заново.", show_alert=True)
         return
 
     city = getattr(db_user, "city", "") or ""
-    city_code = int(parts[1])
-    district_index = int(parts[2])
+    city_code = int(parts[0])
+    district_index = int(parts[1])
     if city not in CITY_DISTRICTS or CITY_CODES.get(city) != city_code:
         await call.answer("Этот район недоступен для выбранного города.", show_alert=True)
         return
@@ -234,7 +235,7 @@ async def open_district_catalog(call: CallbackQuery, session: AsyncSession, db_u
     await state.update_data(current_district=district)
 
     banner = get_main_banner()
-    caption = f"🌊 Каталог • {city} • {district}"
+    caption = f"🍬 Каталог • {city} • {district}"
 
     await send_or_edit_screen(
         event=call,
@@ -253,7 +254,7 @@ async def back_to_candies_assortment(call: CallbackQuery, session: AsyncSession,
     district = data.get("current_district", "Центральный")
     city = getattr(db_user, "city", "Москва") or "Москва"
     banner = get_main_banner()
-    caption = f"🌊 Каталог • {city} • {district}"
+    caption = f"🍬 Каталог • {city} • {district}"
 
     await send_or_edit_screen(
         event=call,
@@ -268,14 +269,20 @@ async def back_to_candies_assortment(call: CallbackQuery, session: AsyncSession,
 @router.callback_query(F.data.startswith("candy_plus_"))
 async def cb_candy_plus(call: CallbackQuery, session: AsyncSession):
     """Увеличение количества товара по единице/половине грамма в зависимости от типа товара."""
-    parts = call.data.split("_")
-    candy_idx = int(parts[2])
+    parts = split_callback_suffix(call.data, "candy_plus_")
+    if not parts or len(parts) < 2 or not parts[0].isdigit():
+        await call.answer("Не удалось определить товар.", show_alert=True)
+        return
+    candy_idx = int(parts[0])
     candy = await get_showcase_product(session, candy_idx)
     if not candy:
         await call.answer("Товар больше недоступен.", show_alert=True)
         return
 
-    qty = float(parts[3])
+    if len(parts) < 2 or not parts[1].replace('.', '', 1).replace('-', '', 1).isdigit():
+        await call.answer("Не удалось определить количество.", show_alert=True)
+        return
+    qty = float(parts[1])
     step = 0.5 if candy.unit == "г" else 1.0
     new_qty = min(qty + step, 50.0)
     price_per_piece = candy.price
@@ -291,14 +298,21 @@ async def cb_candy_plus(call: CallbackQuery, session: AsyncSession):
 @router.callback_query(F.data.startswith("candy_qty_") | F.data.startswith("candy_minus_"))
 async def cb_candy_qty(call: CallbackQuery, session: AsyncSession):
     """Уменьшает количество на 1 шт. или 0.5 г, но не ниже минимума."""
-    parts = call.data.split("_")
-    candy_idx = int(parts[2])
+    prefix = "candy_qty_" if call.data.startswith("candy_qty_") else "candy_minus_"
+    parts = split_callback_suffix(call.data, prefix)
+    if not parts or len(parts) < 2 or not parts[0].isdigit():
+        await call.answer("Не удалось определить товар.", show_alert=True)
+        return
+    candy_idx = int(parts[0])
     candy = await get_showcase_product(session, candy_idx)
     if not candy:
         await call.answer("Товар больше недоступен.", show_alert=True)
         return
 
-    qty = float(parts[3])
+    if len(parts) < 2 or not parts[1].replace('.', '', 1).replace('-', '', 1).isdigit():
+        await call.answer("Не удалось определить количество.", show_alert=True)
+        return
+    qty = float(parts[1])
     step = 0.5 if candy.unit == "г" else 1.0
     minimum = get_minimum_quantity(candy)
 
@@ -321,7 +335,10 @@ async def cb_candy_stock(call: CallbackQuery, session: AsyncSession):
     """
     Имитация проверки наличия на складе с обратным отсчетом.
     """
-    candy_idx = int(call.data.replace("candy_stock_", ""))
+    candy_idx = parse_callback_int(call.data, "candy_stock_")
+    if candy_idx is None:
+        await call.answer("Не удалось определить товар.", show_alert=True)
+        return
     candy = await get_showcase_product(session, candy_idx)
     if not candy:
         await call.answer("Товар больше недоступен.", show_alert=True)
@@ -367,13 +384,16 @@ async def open_candy_detail(call: CallbackQuery, session: AsyncSession, db_user:
     """
     Карточка выбранной конфеты из ассортимента точь-в-точь по скриншоту пользователя:
     - Фото позиции
-    - Подпись: 🌊 Каталог • Москва • Западный • {candy_name}
+    - Подпись: 🍬 Каталог • Москва • Западный • {candy_name}
     - Кнопки:
       [ 1шт ]  [ + ]
       [ ❓ Проверить наличие ]
       [ ⚡️ Назад ]  [ 🛒 Купить {цена за 1 шт}₽ ]
     """
-    candy_idx = int(call.data.replace("candy_", ""))
+    candy_idx = parse_callback_int(call.data, "candy_")
+    if candy_idx is None:
+        await call.answer("Товар больше недоступен.", show_alert=True)
+        return
     candy = await get_showcase_product(session, candy_idx)
     if not candy or not candy.is_active:
         await call.answer("Товар больше недоступен.", show_alert=True)
@@ -387,7 +407,7 @@ async def open_candy_detail(call: CallbackQuery, session: AsyncSession, db_user:
     district = data.get("current_district", "Западный")
     city = getattr(db_user, "city", "Москва") or "Москва"
 
-    caption = f"🌊 Каталог • {city} • {district} • {candy_name}"
+    caption = f"🍬 Каталог • {city} • {district} • {candy_name}"
     photo = get_showcase_photo(candy)
 
     await send_or_edit_screen(
@@ -403,15 +423,21 @@ async def open_candy_detail(call: CallbackQuery, session: AsyncSession, db_user:
 @router.callback_query(F.data.startswith("buy_candy_"))
 async def process_buy_candy(call: CallbackQuery, session: AsyncSession, db_user: User, state: FSMContext, bot: Bot):
     """Оформление покупки конфет с баланса с учетом выбранного количества."""
-    parts = call.data.split("_")
-    candy_idx = int(parts[2])
+    parts = split_callback_suffix(call.data, "buy_candy_")
+    if not parts or len(parts) < 2 or not parts[0].isdigit():
+        await call.answer("Не удалось определить товар.", show_alert=True)
+        return
+    candy_idx = int(parts[0])
 
     candy = await get_showcase_product(session, candy_idx)
     if not candy or not candy.is_active:
         await call.answer("Товар больше недоступен.", show_alert=True)
         return
 
-    qty = float(parts[3]) if len(parts) > 3 else get_minimum_quantity(candy)
+    if len(parts) > 1 and parts[1].replace('.', '', 1).replace('-', '', 1).isdigit():
+        qty = float(parts[1])
+    else:
+        qty = get_minimum_quantity(candy)
     candy_name = candy.title
     base_quantity = get_minimum_quantity(candy)
     try:
@@ -482,14 +508,10 @@ async def process_buy_candy(call: CallbackQuery, session: AsyncSession, db_user:
     )
 
     admin_text = build_admin_order_notification(order_code, db_user, candy_name, qty_text, db_user.city or "—", district, total_price)
-    admin_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🗑 Удалить сообщение", callback_data=f"adm_delete_order_{order_code}")]
-    ])
     try:
         await bot.send_message(
             chat_id=config.RECEIPTS_GROUP_ID,
             text=admin_text,
-            reply_markup=admin_kb,
             parse_mode="HTML"
         )
     except Exception:
@@ -505,25 +527,13 @@ async def process_buy_candy(call: CallbackQuery, session: AsyncSession, db_user:
 # КАТЕГОРИИ И ПОДКАТЕГОРИИ
 # ==========================================
 
-@router.callback_query(F.data.startswith("adm_delete_order_"))
-async def admin_delete_order_message(call: CallbackQuery, session: AsyncSession):
-    """Удаляет сообщение в админ-группе о новом заказе."""
-    db_user = await get_user_by_tg_id(session, call.from_user.id)
-    if call.from_user.id not in config.ADMIN_IDS and not (db_user and db_user.is_admin):
-        await call.answer("⛔️ Нет прав.", show_alert=True)
-        return
-
-    try:
-        await call.message.delete()
-    except Exception:
-        pass
-    await call.answer("Сообщение удалено.", show_alert=False)
-
-
 @router.callback_query(F.data.startswith("cat_"))
 async def open_category(call: CallbackQuery, session: AsyncSession, db_user: User, state: FSMContext):
     """Вход в категорию (товары)."""
-    cat_id = int(call.data.split("_")[1])
+    cat_id = parse_callback_int(call.data, "cat_")
+    if cat_id is None:
+        await call.answer("Категория не найдена.", show_alert=True)
+        return
     category = await get_category_by_id(session, cat_id)
 
     if not category:
@@ -585,7 +595,10 @@ async def open_category(call: CallbackQuery, session: AsyncSession, db_user: Use
 @router.callback_query(F.data.startswith("prod_"))
 async def show_product_card(call: CallbackQuery, session: AsyncSession, state: FSMContext):
     """Карточка товара с остатком в реальном времени."""
-    prod_id = int(call.data.split("_")[1])
+    prod_id = parse_callback_int(call.data, "prod_")
+    if prod_id is None:
+        await call.answer("Товар не найден.", show_alert=True)
+        return
     product = await get_product_by_id(session, prod_id)
 
     if not product:
@@ -614,7 +627,10 @@ async def show_product_card(call: CallbackQuery, session: AsyncSession, state: F
 @router.callback_query(F.data.startswith("buy_"))
 async def process_buy_product(call: CallbackQuery, session: AsyncSession, db_user: User, bot: Bot, state: FSMContext):
     """Обработка покупки товара с баланса."""
-    prod_id = int(call.data.split("_")[1])
+    prod_id = parse_callback_int(call.data, "buy_")
+    if prod_id is None:
+        await call.answer("Товар не найден.", show_alert=True)
+        return
     product = await get_product_by_id(session, prod_id)
 
     if not product:

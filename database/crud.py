@@ -149,6 +149,8 @@ async def get_or_create_user(
         referrer_id=None,
         referral_earnings=0.0,
         used_promos="",
+        start_pending=False,
+        captcha_passed=False,
         is_banned=False,
         is_admin=False
     )
@@ -515,6 +517,7 @@ async def approve_receipt_transaction(session: AsyncSession, transaction_id: int
     tx.user.balance = round(tx.user.balance + amount_rub, 2)
     await session.commit()
     await session.refresh(tx)
+    await session.refresh(tx.user)
     return tx
 
 

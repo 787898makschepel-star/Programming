@@ -1,7 +1,11 @@
 from typing import Callable, Dict, Any, Awaitable
+import logging
+
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 class DbSessionMiddleware(BaseMiddleware):
@@ -26,4 +30,5 @@ class DbSessionMiddleware(BaseMiddleware):
                 return result
             except Exception:
                 await session.rollback()
+                logger.exception("Unhandled exception while processing Telegram event; rollback performed.")
                 raise

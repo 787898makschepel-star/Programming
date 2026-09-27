@@ -1,6 +1,7 @@
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
+from keyboards.inline_admin import InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import User
@@ -13,6 +14,7 @@ from database.crud import (
     get_user_orders
 )
 from keyboards.inline_admin import get_user_manage_kb
+from utils.callback_parser import parse_callback_int
 from states.admin_states import UserSearchState, UserBalanceState
 from utils.ui_cleaner import send_or_edit_screen, delete_user_message
 from utils.formatters import format_admin_user_card, DIVIDER
@@ -76,7 +78,10 @@ async def process_user_search(message: Message, state: FSMContext, session: Asyn
 @router.callback_query(F.data.startswith("adm_ban_"))
 async def process_ban_user(call: CallbackQuery, session: AsyncSession):
     """Блокировка пользователя."""
-    tg_id = int(call.data.split("_")[2])
+    tg_id = parse_callback_int(call.data, "adm_ban_")
+    if tg_id is None:
+        await call.answer("Не удалось определить пользователя.", show_alert=True)
+        return
     user = await set_user_ban_status(session, tg_id, is_banned=True)
     if user:
         await call.answer("Пользователь заблокирован!", show_alert=True)
@@ -88,7 +93,10 @@ async def process_ban_user(call: CallbackQuery, session: AsyncSession):
 @router.callback_query(F.data.startswith("adm_unban_"))
 async def process_unban_user(call: CallbackQuery, session: AsyncSession):
     """Разблокировка пользователя."""
-    tg_id = int(call.data.split("_")[2])
+    tg_id = parse_callback_int(call.data, "adm_unban_")
+    if tg_id is None:
+        await call.answer("Не удалось определить пользователя.", show_alert=True)
+        return
     user = await set_user_ban_status(session, tg_id, is_banned=False)
     if user:
         await call.answer("Пользователь разблокирован!", show_alert=True)
@@ -100,7 +108,10 @@ async def process_unban_user(call: CallbackQuery, session: AsyncSession):
 @router.callback_query(F.data.startswith("adm_make_admin_"))
 async def process_make_admin(call: CallbackQuery, session: AsyncSession):
     """Назначить найденного пользователя администратором бота."""
-    tg_id = int(call.data.removeprefix("adm_make_admin_"))
+    tg_id = parse_callback_int(call.data, "adm_make_admin_")
+    if tg_id is None:
+        await call.answer("Не удалось определить пользователя.", show_alert=True)
+        return
     user = await set_user_admin_status(session, tg_id)
     if not user:
         await call.answer("Пользователь не найден.", show_alert=True)
@@ -123,7 +134,10 @@ async def admin_already(call: CallbackQuery):
 @router.callback_query(F.data.startswith("adm_bal_add_"))
 async def start_balance_add(call: CallbackQuery, state: FSMContext):
     """Начало начисления баланса."""
-    tg_id = int(call.data.split("_")[3])
+    tg_id = parse_callback_int(call.data, "adm_bal_add_")
+    if tg_id is None:
+        await call.answer("Не удалось определить пользователя.", show_alert=True)
+        return
     await state.set_state(UserBalanceState.waiting_for_amount)
     await state.update_data(target_tg_id=tg_id, action="add")
 
@@ -135,7 +149,10 @@ async def start_balance_add(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("adm_bal_sub_"))
 async def start_balance_sub(call: CallbackQuery, state: FSMContext):
     """Начало списания баланса."""
-    tg_id = int(call.data.split("_")[3])
+    tg_id = parse_callback_int(call.data, "adm_bal_sub_")
+    if tg_id is None:
+        await call.answer("Не удалось определить пользователя.", show_alert=True)
+        return
     await state.set_state(UserBalanceState.waiting_for_amount)
     await state.update_data(target_tg_id=tg_id, action="sub")
 

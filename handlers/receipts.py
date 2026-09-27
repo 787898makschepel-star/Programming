@@ -9,7 +9,6 @@ from aiogram.types import (
     Message,
     CallbackQuery,
     InlineKeyboardMarkup,
-    InlineKeyboardButton,
     FSInputFile
 )
 from aiogram.fsm.context import FSMContext
@@ -17,6 +16,7 @@ from aiogram.filters import StateFilter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import config, get_receipts_chat_ids
+from keyboards.inline_admin import InlineKeyboardButton
 from database.models import User, PaymentStatus, Transaction
 from database.crud import (
     create_transaction,
@@ -29,6 +29,7 @@ from states.client_states import CryptoTxState
 from states.admin_states import AdminReceiptState
 from utils.ui_cleaner import send_or_edit_screen, delete_user_message
 from utils.formatters import DIVIDER
+from utils.callback_parser import parse_callback_int
 
 logger = logging.getLogger(__name__)
 
@@ -283,7 +284,10 @@ async def cb_admin_reject_receipt(call: CallbackQuery, session: AsyncSession, bo
         await call.answer("⛔️ Нет прав.", show_alert=True)
         return
 
-    tx_id = int(call.data.removeprefix("rcpt_rej_"))
+    tx_id = parse_callback_int(call.data, "rcpt_rej_")
+    if tx_id is None:
+        await call.answer("Заявка не найдена.", show_alert=True)
+        return
     tx = await reject_receipt_transaction(session, tx_id)
     if not tx:
         await call.answer("Заявка не найдена.", show_alert=True)
@@ -352,7 +356,10 @@ async def cb_admin_approve_click(call: CallbackQuery, session: AsyncSession, sta
         await call.answer("⛔️ Нет прав.", show_alert=True)
         return
 
-    tx_id = int(call.data.removeprefix("rcpt_app_"))
+    tx_id = parse_callback_int(call.data, "rcpt_app_")
+    if tx_id is None:
+        await call.answer("Заявка не найдена.", show_alert=True)
+        return
     tx = await get_transaction_by_id(session, tx_id)
     if not tx:
         await call.answer("Заявка не найдена.", show_alert=True)
