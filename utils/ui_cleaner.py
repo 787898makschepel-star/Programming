@@ -83,7 +83,7 @@ async def send_or_edit_screen(
             if photo and current_msg.photo:
                 try:
                     edited = await current_msg.edit_media(
-                        media=InputMediaPhoto(media=photo, caption=text, parse_mode="HTML"),
+                        media=InputMediaPhoto(media=photo, caption=text or None, parse_mode="HTML" if text else None),
                         reply_markup=reply_markup
                     )
                     if state:
@@ -91,8 +91,8 @@ async def send_or_edit_screen(
                     return edited
                 except Exception:
                     edited = await current_msg.edit_caption(
-                        caption=text,
-                        parse_mode="HTML",
+                        caption=text or None,
+                        parse_mode="HTML" if text else None,
                         reply_markup=reply_markup
                     )
                     if state:
@@ -102,7 +102,7 @@ async def send_or_edit_screen(
             # 2. Если фото нет и сообщение текстовое -> edit_text
             elif not photo and not current_msg.photo:
                 edited = await current_msg.edit_text(
-                    text=text,
+                    text=text or "Главное меню",
                     parse_mode="HTML",
                     reply_markup=reply_markup,
                     disable_web_page_preview=True
@@ -134,14 +134,14 @@ async def send_or_edit_screen(
         new_msg = await active_bot.send_photo(
             chat_id=chat_id,
             photo=photo,
-            caption=text,
-            parse_mode="HTML",
+            caption=text or None,
+            parse_mode="HTML" if text else None,
             reply_markup=reply_markup
         )
     else:
         new_msg = await active_bot.send_message(
             chat_id=chat_id,
-            text=text,
+            text=text or "Главное меню",
             parse_mode="HTML",
             reply_markup=reply_markup,
             disable_web_page_preview=True

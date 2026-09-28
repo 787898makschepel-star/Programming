@@ -38,6 +38,13 @@ from keyboards.inline_client import (
 from utils.ui_cleaner import send_or_edit_screen
 from utils.formatters import format_product_card, format_purchase_success, DIVIDER
 from utils.callback_parser import split_callback_suffix, parse_callback_int, parse_callback_suffix
+from utils.units import (
+    is_gram_unit,
+    get_default_min_quantity,
+    get_quantity_step,
+    format_quantity_label,
+    format_quantity_with_unit
+)
 
 router = Router(name="client_catalog")
 
@@ -61,20 +68,24 @@ def get_candy_photo(candy_idx: int) -> FSInputFile | None:
 
 
 def get_showcase_photo(product: ShowcaseProduct) -> str | FSInputFile | None:
-    return product.image_file_id or get_main_banner()
+    if product.image_file_id:
+        if os.path.exists(product.image_file_id):
+            return FSInputFile(product.image_file_id)
+        return product.image_file_id
+    return get_main_banner()
 
 
 def get_start_quantity_for_unit(unit: str) -> float:
     """Главное правило: все карточки в граммах стартуют с 0.5 г, все штуки — с 3 шт."""
-    return 0.5 if unit == "г" else 3.0
+    return get_default_min_quantity(unit)
 
 
 def get_minimum_quantity(product: ShowcaseProduct) -> float:
     """Возвращает сохранённый минимум заказа с безопасным fallback для старых записей."""
     minimum = float(product.start_quantity or 0)
-    if product.unit == "г":
-        return max(0.5, minimum)
-    return max(3.0, minimum)
+    if minimum > 0:
+        return minimum
+    return get_default_min_quantity(product.unit)
 
 
 def calculate_showcase_total(base_price: float, base_quantity: float, quantity: float, unit: str) -> float:
@@ -82,15 +93,19 @@ def calculate_showcase_total(base_price: float, base_quantity: float, quantity: 
     if base_price < 0 or base_quantity <= 0 or quantity <= 0:
         raise ValueError("Цена и количество должны быть положительными")
 
-    if unit == "г":
-        if quantity % 0.5 != 0:
+    if round(quantity, 4) < round(base_quantity, 4):
+        raise ValueError(f"Минимальное количество товара — {format_quantity_label(base_quantity, unit)}")
+
+    if is_gram_unit(unit):
+        rem = round((quantity * 10) % 5, 2)
+        if rem not in (0.0, 5.0):
             raise ValueError("Количество в граммах должно быть кратно 0.5")
         return round((base_price / base_quantity) * quantity, 2)
 
-    minimum_quantity = 3
-    if quantity < minimum_quantity or quantity != int(quantity):
-        raise ValueError("Минимальное количество товара — 3 шт.")
-    return round(base_price + ((quantity - minimum_quantity) * (base_price / minimum_quantity)), 2)
+    if quantity != int(quantity):
+        raise ValueError("Количество в штуках должно быть целым числом")
+    return round((base_price / base_quantity) * quantity, 2)
+
 
 
 def build_waiting_for_coordinates_text(order_code: int, candy_name: str, qty_text: str, total_price: float, district: str) -> str:
@@ -283,10 +298,11 @@ async def cb_candy_plus(call: CallbackQuery, session: AsyncSession):
         await call.answer("Не удалось определить количество.", show_alert=True)
         return
     qty = float(parts[1])
-    step = 0.5 if candy.unit == "г" else 1.0
-    new_qty = min(qty + step, 50.0)
+    step = get_quantity_step(candy.unit)
+    new_qty = round(min(qty + step, 50.0), 2)
     price_per_piece = candy.price
-    kb = get_candy_card_kb(candy_idx, qty=new_qty, price_per_piece=price_per_piece, unit=candy.unit, base_quantity=get_minimum_quantity(candy))
+    base_quantity = get_minimum_quantity(candy)
+    kb = get_candy_card_kb(candy_idx, qty=new_qty, price_per_piece=price_per_piece, unit=candy.unit, base_quantity=base_quantity)
 
     try:
         await call.message.edit_reply_markup(reply_markup=kb)
@@ -313,20 +329,21 @@ async def cb_candy_qty(call: CallbackQuery, session: AsyncSession):
         await call.answer("Не удалось определить количество.", show_alert=True)
         return
     qty = float(parts[1])
-    step = 0.5 if candy.unit == "г" else 1.0
+    step = get_quantity_step(candy.unit)
     minimum = get_minimum_quantity(candy)
 
-    if qty - step >= minimum:
+    if round(qty - step, 4) >= round(minimum, 4):
         new_qty = round(qty - step, 2)
         price_per_piece = candy.price
-        kb = get_candy_card_kb(candy_idx, qty=new_qty, price_per_piece=price_per_piece, unit=candy.unit, base_quantity=get_minimum_quantity(candy))
+        kb = get_candy_card_kb(candy_idx, qty=new_qty, price_per_piece=price_per_piece, unit=candy.unit, base_quantity=minimum)
         try:
             await call.message.edit_reply_markup(reply_markup=kb)
         except Exception:
             pass
         await call.answer()
     else:
-        message = "Минимальное количество для заказа — 0.5 г." if candy.unit == "г" else "Минимальное количество для заказа — 3 шт."
+        formatted_min = format_quantity_label(minimum, candy.unit)
+        message = f"Минимальный заказ для этой позиции — {formatted_min}"
         await call.answer(message, show_alert=False)
 
 
@@ -451,7 +468,7 @@ async def process_buy_candy(call: CallbackQuery, session: AsyncSession, db_user:
 
     if db_user.balance < total_price:
         needed = round(total_price - db_user.balance, 2)
-        qty_text = f"{float(qty):g} г" if candy.unit == "г" else f"{int(qty)} шт."
+        qty_text = format_quantity_with_unit(qty, candy.unit)
         text = (
             f"❌ <b>Недостаточно средств на балансе</b>\n"
             f"{DIVIDER}\n"
@@ -477,7 +494,7 @@ async def process_buy_candy(call: CallbackQuery, session: AsyncSession, db_user:
     await session.commit()
 
     import random
-    qty_text = f"{float(qty):g} г" if candy.unit == "г" else f"{int(qty)} шт."
+    qty_text = format_quantity_with_unit(qty, candy.unit)
     order = Order(
         user_id=db_user.id,
         product_id=None,

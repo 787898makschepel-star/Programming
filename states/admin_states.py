@@ -26,6 +26,7 @@ class ShowcaseProductState(StatesGroup):
     waiting_for_unit = State()
     waiting_for_quantity = State()
     waiting_for_image = State()
+    waiting_for_image_only = State()
 
 
 class UserSearchState(StatesGroup):

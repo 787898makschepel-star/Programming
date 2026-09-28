@@ -120,8 +120,7 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
         await bot.send_photo(
             chat_id=message.chat.id,
             photo=banner,
-            caption="🌊 <b>Главное меню</b>",
-            parse_mode="HTML",
+            caption=None,
             reply_markup=get_main_menu_kb(db_user),
         )
     else:
@@ -288,7 +287,7 @@ async def process_city_input(message: Message, session: AsyncSession, db_user: U
             )
         await send_or_edit_screen(
             event=message,
-            text="🌊 <b>Главное меню</b>",
+            text="",
             reply_markup=get_main_menu_kb(db_user),
             photo=get_main_banner(),
             state=state,

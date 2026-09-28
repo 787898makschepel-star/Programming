@@ -9,6 +9,7 @@ from database.crud import (
     delete_showcase_product,
     get_showcase_product,
     get_showcase_products,
+    update_showcase_product_image,
     update_showcase_product,
 )
 from keyboards.inline_admin import (
@@ -101,6 +102,76 @@ async def start_edit_showcase(call: CallbackQuery, session: AsyncSession, state:
         state=state,
     )
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm_showcase_image_"))
+async def start_image_only_edit(call: CallbackQuery, session: AsyncSession, state: FSMContext):
+    product_id = parse_callback_int(call.data, "adm_showcase_image_")
+    if product_id is None:
+        await call.answer("Товар не найден.", show_alert=True)
+        return
+    product = await get_showcase_product(session, product_id)
+    if not product:
+        await call.answer("Товар не найден.", show_alert=True)
+        return
+
+    await state.clear()
+    await state.set_state(ShowcaseProductState.waiting_for_image_only)
+    await state.update_data(editing_product_id=product_id)
+    await send_or_edit_screen(
+        call,
+        "🖼️ <b>Изменение картинки товара</b>\n"
+        f"{DIVIDER}\n"
+        f"Товар: <b>{product.title}</b>\n"
+        f"Цена и остальные данные останутся без изменений.\n\n"
+        "Отправьте новую фотографию товара:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="adm_showcase")]
+        ]),
+        state=state,
+    )
+    await call.answer()
+
+
+@router.message(ShowcaseProductState.waiting_for_image_only, F.photo)
+async def save_image_only(message: Message, state: FSMContext, session: AsyncSession, bot):
+    data = await state.get_data()
+    product = await update_showcase_product_image(
+        session=session,
+        product_id=data.get("editing_product_id"),
+        image_file_id=message.photo[-1].file_id,
+    )
+    await delete_user_message(message)
+    if not product:
+        await state.clear()
+        await send_or_edit_screen(message, "⚠️ Товар не найден.", state=state, bot=bot)
+        return
+
+    await state.clear()
+    await send_or_edit_screen(
+        message,
+        f"✅ <b>Картинка товара обновлена</b>\n{DIVIDER}\n"
+        f"🏷 {product.title}\n"
+        f"💵 {product.price:g} ₽\n"
+        "Остальные значения товара не изменены.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🛍️ К товарам", callback_data="adm_showcase")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="adm_main")],
+        ]),
+        state=state,
+        bot=bot,
+    )
+
+
+@router.message(ShowcaseProductState.waiting_for_image_only)
+async def image_only_required(message: Message, state: FSMContext, bot):
+    await delete_user_message(message)
+    await send_or_edit_screen(
+        message,
+        "⚠️ Отправьте именно фотографию товара.",
+        state=state,
+        bot=bot,
+    )
 
 
 @router.message(ShowcaseProductState.waiting_for_title)

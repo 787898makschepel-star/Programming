@@ -5,37 +5,56 @@ from database.models import Category, Product, ProductItem, ProductType, Showcas
 
 logger = logging.getLogger(__name__)
 
-SHOWCASE_DEFAULTS = [
-    ("Anonymous 2.0 - 310mg", 1680), ("Punisher - 300mg", 1650),
-    ("Red Bull - 280mg", 1500), ("Maybach - 320mg", 1700),
-    ("Tesla - 300mg", 1650), ("Chupa Chups - 270mg", 1450),
-    ("Burger King - 290mg", 1550), ("Rolex - 310mg", 1680),
-    ("Skittles - 260mg", 1400), ("Philipp Plein - 300mg", 1550),
-    ("EA7 Emporio - 280mg", 1500), ("Gucci - 320mg", 1750),
-    ("Supreme - 290mg", 1550), ("Heineken - 280mg", 1500),
-    ("Audi - 300mg", 1600), ("Warner Bros - 310mg", 1680),
-]
+from catalog_config import SHOWCASE_PRODUCTS
 
 
 async def seed_showcase_catalog(session: AsyncSession) -> None:
-    """Создаёт начальную витрину, если администратор ещё не добавлял товары."""
-    count = (await session.execute(select(func.count(ShowcaseProduct.id)))).scalar() or 0
+    """
+    Синхронизирует витрину с файлом catalog_config.py:
+    обновляет названия, цены, единицы (г/шт.), минимальный заказ и картинки.
+    """
     default_category = (await session.execute(select(Category).order_by(Category.id).limit(1))).scalar_one_or_none()
-    if count:
-        if default_category:
-            existing = (await session.execute(
-                select(ShowcaseProduct).where(ShowcaseProduct.category_id.is_(None))
-            )).scalars().all()
-            for product in existing:
-                product.category_id = default_category.id
-            if existing:
-                await session.commit()
-        return
-    session.add_all([
-        ShowcaseProduct(title=title, price=price, category_id=default_category.id if default_category else None, is_active=True)
-        for title, price in SHOWCASE_DEFAULTS
-    ])
+    default_cat_id = default_category.id if default_category else None
+
+    existing_products = list((await session.execute(
+        select(ShowcaseProduct).order_by(ShowcaseProduct.id)
+    )).scalars().all())
+
+    for idx, item in enumerate(SHOWCASE_PRODUCTS):
+        title = item.get("title", f"Товар {idx + 1}")
+        price = float(item.get("price", 1000))
+        unit = str(item.get("unit", "шт."))
+        min_qty = float(item.get("min_quantity") or item.get("start_quantity") or (0.5 if unit == "г" else 3.0))
+        image = item.get("image") or item.get("image_file_id")
+
+        if idx < len(existing_products):
+            prod = existing_products[idx]
+            prod.title = title
+            prod.price = price
+            prod.unit = unit
+            prod.start_quantity = min_qty
+            prod.image_file_id = image
+            prod.is_active = item.get("is_active", True)
+            if default_cat_id and not prod.category_id:
+                prod.category_id = default_cat_id
+        else:
+            new_prod = ShowcaseProduct(
+                title=title,
+                price=price,
+                unit=unit,
+                start_quantity=min_qty,
+                image_file_id=image,
+                category_id=default_cat_id,
+                is_active=item.get("is_active", True)
+            )
+            session.add(new_prod)
+
+    if len(existing_products) > len(SHOWCASE_PRODUCTS):
+        for prod in existing_products[len(SHOWCASE_PRODUCTS):]:
+            prod.is_active = False
+
     await session.commit()
+    logger.info("Витрина товаров успешно синхронизирована с catalog_config.py (%d позиций).", len(SHOWCASE_PRODUCTS))
 
 
 async def seed_initial_catalog(session: AsyncSession) -> None:

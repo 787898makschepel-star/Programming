@@ -46,6 +46,7 @@ def get_showcase_admin_kb(products) -> InlineKeyboardMarkup:
                 callback_data=f"adm_showcase_edit_{product.id}"
             ),
             InlineKeyboardButton(text="✏️", callback_data=f"adm_showcase_edit_{product.id}"),
+            InlineKeyboardButton(text="🖼️", callback_data=f"adm_showcase_image_{product.id}"),
             InlineKeyboardButton(text="🗑", callback_data=f"adm_showcase_del_{product.id}")
         )
     builder.row(InlineKeyboardButton(text="🔙 В админку", callback_data="adm_main"))

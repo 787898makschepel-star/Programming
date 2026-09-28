@@ -26,11 +26,11 @@ def validate_showcase_minimum(unit: str, quantity: float) -> float:
     if quantity <= 0:
         raise ValueError("Минимальное количество должно быть положительным")
     if unit == "г":
-        if quantity < 0.5 or quantity % 0.5 != 0:
+        if quantity < 0.5 or round(quantity % 0.5, 4) not in (0.0, 0.5):
             raise ValueError("Минимум для граммов — 0.5 г с шагом 0.5")
     elif unit == "шт.":
-        if quantity < 3 or not quantity.is_integer():
-            raise ValueError("Минимум для штук — 3 шт. или больше целым числом")
+        if quantity < 1 or not float(quantity).is_integer():
+            raise ValueError("Минимум для штук — от 1 шт. целым числом")
     else:
         raise ValueError("Неизвестная единица измерения")
     return float(quantity)
@@ -43,6 +43,20 @@ async def get_showcase_products(session: AsyncSession, include_inactive: bool = 
 
 async def get_showcase_product(session: AsyncSession, product_id: int) -> Optional[ShowcaseProduct]:
     return await session.get(ShowcaseProduct, product_id)
+
+
+async def update_showcase_product_image(
+    session: AsyncSession,
+    product_id: int,
+    image_file_id: str,
+) -> Optional[ShowcaseProduct]:
+    product = await get_showcase_product(session, product_id)
+    if not product:
+        return None
+    product.image_file_id = image_file_id
+    await session.commit()
+    await session.refresh(product)
+    return product
 
 
 async def create_showcase_product(

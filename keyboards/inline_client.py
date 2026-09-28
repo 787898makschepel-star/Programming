@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton as TelegramInlineKeyboardButton,
@@ -79,17 +79,25 @@ def get_game_reply_kb() -> ReplyKeyboardMarkup:
 
 def get_bottom_reply_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
     """Нижняя постоянная панель с дополнительной кнопкой админ-команды."""
-    main_label, emoji_id = resolve_reply_button("main_menu", "🌊 Главное меню", "main_menu")
-    button_kwargs = {"icon_custom_emoji_id": emoji_id} if emoji_id else {}
-    keyboard = [[KeyboardButton(text=main_label, **button_kwargs)]]
+    main_label, main_emoji_id = resolve_reply_button("main_menu", "🌊 Главное меню", "main_menu")
+    main_button = (
+        KeyboardButton(text=main_label, icon_custom_emoji_id=main_emoji_id)
+        if main_emoji_id
+        else KeyboardButton(text=main_label)
+    )
+    keyboard = [[main_button]]
     if is_admin:
         admin_label, admin_emoji_id = resolve_reply_button("admin", "/admin")
-        admin_kwargs = {"icon_custom_emoji_id": admin_emoji_id} if admin_emoji_id else {}
-        keyboard.append([KeyboardButton(text=admin_label, **admin_kwargs)])
+        admin_button = (
+            KeyboardButton(text=admin_label, icon_custom_emoji_id=admin_emoji_id)
+            if admin_emoji_id
+            else KeyboardButton(text=admin_label)
+        )
+        keyboard.append([admin_button])
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
         resize_keyboard=True,
-        persistent=True
+        persistent=True,
     )
 
 
@@ -163,7 +171,7 @@ def get_districts_kb(city: str = "") -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-CANDY_ITEMS: List[Dict[str, any]] = [
+CANDY_ITEMS: List[Dict[str, Any]] = [
     {"name": "Anonymous 2.0 - 310mg", "price": 1680, "image": "assets/candy_anonymous.jpg"},
     {"name": "Punisher - 300mg", "price": 1650, "image": None},
     {"name": "Red Bull - 280mg", "price": 1500, "image": None},
@@ -183,7 +191,7 @@ CANDY_ITEMS: List[Dict[str, any]] = [
 ]
 
 
-def get_candy_by_idx(candy_idx: int) -> Dict[str, any]:
+def get_candy_by_idx(candy_idx: int) -> Dict[str, Any]:
     """Получение конфеты по индексу."""
     if 1 <= candy_idx <= len(CANDY_ITEMS):
         item = CANDY_ITEMS[candy_idx - 1]
@@ -193,20 +201,17 @@ def get_candy_by_idx(candy_idx: int) -> Dict[str, any]:
     return {"name": "Конфеты высшего сорта", "price": 1680, "image": None}
 
 
+from utils.units import (
+    is_gram_unit,
+    get_default_min_quantity,
+    get_quantity_step,
+    format_quantity_label,
+)
+
+
 def get_default_quantity_for_unit(unit: str) -> float:
     """Стартовое количество в карточке смотри по типу единицы."""
-    if unit == "г":
-        return 0.5
-    if unit == "шт.":
-        return 3.0
-    return 1.0
-
-
-def format_quantity_label(qty: float, unit: str) -> str:
-    """Форматирует число для кнопки количества: 0.5г, 3шт, 1г."""
-    if unit == "г":
-        return f"{float(qty):g}г"
-    return f"{int(qty)}шт"
+    return get_default_min_quantity(unit)
 
 
 def get_candies_assortment_kb(products=None) -> InlineKeyboardMarkup:
@@ -221,29 +226,29 @@ def get_candies_assortment_kb(products=None) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_candy_card_kb(candy_idx: int, qty: float = 3.0, price_per_piece: float = 1680.0, unit: str = "шт.", base_quantity: float = 0.5) -> InlineKeyboardMarkup:
-    """Карточка выбранной конфеты с корректным стартовым количеством для граммов и штук."""
+def get_candy_card_kb(candy_idx: int, qty: float = 3.0, price_per_piece: float = 1680.0, unit: str = "шт.", base_quantity: float = 3.0) -> InlineKeyboardMarkup:
+    """Карточка выбранного товара с корректным расчетом цены и шага."""
     builder = InlineKeyboardBuilder()
-    base_quantity = base_quantity if unit == "г" else 3.0
-    if unit == "г":
-        total_price = round((price_per_piece / base_quantity) * qty)
-    else:
-        total_price = round(price_per_piece + ((qty - 3.0) * (price_per_piece / 3.0)))
+    if base_quantity <= 0:
+        base_quantity = get_default_min_quantity(unit)
+    total_price = round((price_per_piece / base_quantity) * qty)
     quantity_label = format_quantity_label(qty, unit)
+    qty_cb = f"{float(qty):g}"
 
     builder.row(
-        InlineKeyboardButton(text="−", callback_data=f"candy_minus_{candy_idx}_{qty}"),
-        InlineKeyboardButton(text=quantity_label, callback_data=f"candy_qty_{candy_idx}_{qty}"),
-        InlineKeyboardButton(text="+", callback_data=f"candy_plus_{candy_idx}_{qty}")
+        InlineKeyboardButton(text="−", callback_data=f"candy_minus_{candy_idx}_{qty_cb}"),
+        InlineKeyboardButton(text=quantity_label, callback_data=f"candy_qty_{candy_idx}_{qty_cb}"),
+        InlineKeyboardButton(text="+", callback_data=f"candy_plus_{candy_idx}_{qty_cb}")
     )
     builder.row(
         InlineKeyboardButton(text="✅ Проверить наличие", callback_data=f"candy_stock_{candy_idx}")
     )
     builder.row(
         InlineKeyboardButton(text="⚡️ Назад", callback_data="back_to_assortment"),
-        InlineKeyboardButton(text=f"🛒 Купить {total_price}₽", callback_data=f"buy_candy_{candy_idx}_{qty}")
+        InlineKeyboardButton(text=f"🛒 Купить {total_price}₽", callback_data=f"buy_candy_{candy_idx}_{qty_cb}")
     )
     return builder.as_markup()
+
 
 
 get_cities_kb = get_city_select_kb
