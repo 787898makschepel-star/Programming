@@ -10,6 +10,7 @@ from database.crud import get_user_orders, get_order_by_id, update_user_balance,
 from keyboards.inline_client import (
     get_balance_methods_kb,
     get_crypto_wallet_kb,
+    get_crypto_networks_kb,
     get_order_history_kb,
     get_back_to_menu_kb
 )
@@ -44,7 +45,7 @@ async def show_balance_methods(call: CallbackQuery, state: FSMContext):
     - Кнопки:
       👨‍💻 Через оператора [24/7]
       💲 Криптовалюта [АВТО]
-      🌊 Главное меню
+    🍭 Главное меню
     """
     await state.clear()
     banner = get_main_banner()
@@ -61,48 +62,34 @@ async def show_balance_methods(call: CallbackQuery, state: FSMContext):
 
 
 # ==========================================
-# ЭКРАН КРИПТОВАЛЮТЫ USDT TRC20 (СКРИНШОТ 2)
+# ВЫБОР СЕТИ USDT
 # ==========================================
 
 @router.callback_query(F.data == "topup_crypto_auto")
 async def show_crypto_screen(call: CallbackQuery, state: FSMContext):
-    """
-    Экран пополнения криптовалютой USDT TRC20:
-    - Баннер
-    - Реквизиты кошелька
-    - Инструкция по отправке чека
-    - Кнопка: ⚡️ Назад
-    """
-    await state.set_state(CryptoTxState.waiting_for_receipt)
-    banner = get_main_banner()
-    wallet = config.USDT_TRC20_WALLET
-
+    """Предлагает выбрать сеть для перевода USDT."""
+    await state.clear()
     caption = (
-        f"💲 <b>Пополнение криптовалютой (USDT TRC20)</b>\n\n"
-        f"<b>Кошелек для перевода:</b>\n"
-        f"<code>{wallet}</code>\n\n"
-        f"📌 <b>Инструкция:</b>\n"
-        f"1. Совершите перевод в USDT (сеть TRC20).\n"
-        f"2. Отправьте сюда <b>фото/скриншот чека</b> об оплате или напишите сумму и TxID.\n"
-        f"3. Администратор проверит чек, сконвертирует сумму в рубли и моментально пополнит баланс."
+        f"💲 <b>Пополнение баланса в USDT</b>\n"
+        f"{DIVIDER}\n"
+        f"Выберите сеть, в которой будете отправлять USDT.\n\n"
+        f"⚠️ Сеть отправки должна точно совпадать с выбранной сетью."
     )
 
     await send_or_edit_screen(
         event=call,
         text=caption,
-        reply_markup=get_crypto_wallet_kb(),
-        photo=banner,
+        reply_markup=get_crypto_networks_kb(),
+        photo=get_main_banner(),
         state=state
     )
     await call.answer()
 
 
 MANUAL_CRYPTO_METHODS = {
-    "usdt_bep20": ("USDT BEP20", "USDT", "BEP20", "USDT_BEP20_WALLET"),
-    "bnb_bep20": ("BNB BEP20", "BNB", "BEP20", "BNB_BEP20_WALLET"),
-    "btc": ("Bitcoin", "BTC", "Bitcoin", "BTC_WALLET"),
-    "eth": ("Ethereum ERC20", "ETH", "ERC20", "ETH_ERC20_WALLET"),
-    "ltc": ("Litecoin", "LTC", "Litecoin", "LTC_WALLET"),
+    "usdt_trc20": ("USDT · TRC20", "USDT", "TRC20 (Tron)", "USDT_TRC20_ADDRESS"),
+    "usdt_erc20": ("USDT · ERC20", "USDT", "ERC20 (Ethereum)", "USDT_ERC20_ADDRESS"),
+    "usdt_bep20": ("USDT · BEP20", "USDT", "BEP20 (BNB Smart Chain)", "USDT_BEP20_ADDRESS"),
 }
 
 
@@ -123,15 +110,16 @@ async def show_manual_crypto_screen(call: CallbackQuery, state: FSMContext):
     wallet = getattr(config, wallet_setting)
     await state.set_state(CryptoTxState.waiting_for_receipt)
     caption = (
-        f"💳 <b>Пополнение через {title}</b>\n"
+        f"💳 <b>Пополнение баланса · {title}</b>\n"
         f"{DIVIDER}\n"
         f"🌐 Сеть: <code>{network}</code>\n"
         f"💰 Валюта: <code>{currency}</code>\n\n"
-        f"📋 <b>Адрес для перевода:</b>\n"
+        f"📋 <b>Адрес для перевода</b> (нажмите, чтобы скопировать):\n"
         f"<code>{wallet}</code>\n\n"
-        f"Нажмите и удерживайте адрес, чтобы скопировать его.\n\n"
-        f"После перевода отправьте сюда фото/скриншот чека или сумму и TxID.\n"
-        f"Администратор проверит платеж и зачислит сумму на баланс."
+        f"⚠️ Отправляйте <b>только USDT</b> через указанную сеть. Перевод в другой сети или другой монеты может быть потерян.\n\n"
+        f"1. Отправьте нужную сумму на адрес выше.\n"
+        f"2. Ответным сообщением пришлите сумму и TxID либо фото/скриншот чека.\n"
+        f"3. После проверки администратор зачислит средства на ваш баланс."
     )
     await send_or_edit_screen(
         call,

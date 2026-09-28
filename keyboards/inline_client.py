@@ -66,7 +66,7 @@ def get_game_reply_kb() -> ReplyKeyboardMarkup:
     """Возвращает игровую Reply-клавиатуру из двух рядов."""
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🌊 Главное меню")],
+            [KeyboardButton(text="🍭 Главное меню")],
             [
                 KeyboardButton(text="🛟 Тех. Поддержка"),
                 KeyboardButton(text="💸 Работа без залога"),
@@ -79,7 +79,7 @@ def get_game_reply_kb() -> ReplyKeyboardMarkup:
 
 def get_bottom_reply_kb(is_admin: bool = False) -> ReplyKeyboardMarkup:
     """Нижняя постоянная панель с дополнительной кнопкой админ-команды."""
-    main_label, main_emoji_id = resolve_reply_button("main_menu", "🌊 Главное меню", "main_menu")
+    main_label, main_emoji_id = resolve_reply_button("main_menu", "🍭 Главное меню", "main_menu")
     main_button = (
         KeyboardButton(text=main_label, icon_custom_emoji_id=main_emoji_id)
         if main_emoji_id
@@ -112,8 +112,8 @@ def get_main_menu_kb(user: Optional[User] = None) -> InlineKeyboardMarkup:
         b = user.balance
         balance_val = int(b) if b.is_integer() else round(b, 2)
 
-    # 1. 🌊 Каталог (одна кнопка)
-    builder.row(InlineKeyboardButton(text="🌊 Каталог", callback_data="client_catalog", scope="main_menu"))
+    # 1. 🍭 Каталог (одна кнопка)
+    builder.row(InlineKeyboardButton(text="🍭 Каталог", callback_data="client_catalog", scope="main_menu"))
     # 2. 💰 Баланс + 🛒 Покупки (две кнопки в ряд)
     builder.row(
         InlineKeyboardButton(text=f"💰 Баланс ({balance_val}₽)", callback_data="client_profile", scope="main_menu"),
@@ -308,18 +308,26 @@ def get_balance_methods_kb() -> InlineKeyboardMarkup:
     support_url = f"https://t.me/{config.SUPPORT_USERNAME.lstrip('@')}" if config.SUPPORT_USERNAME.startswith("@") else config.SUPPORT_USERNAME
 
     builder.row(InlineKeyboardButton(text="👨‍💻 Через оператора [24/7]", url=support_url))
-    builder.row(InlineKeyboardButton(text="💲 Криптовалюта [АВТО]", callback_data="topup_crypto_auto"))
-    builder.row(InlineKeyboardButton(text="🌊 Главное меню", callback_data="to_main_menu"))
+    builder.row(InlineKeyboardButton(text="💲 Криптовалюта · USDT", callback_data="topup_crypto_auto"))
+    builder.row(InlineKeyboardButton(text="🍭 Главное меню", callback_data="to_main_menu"))
     return builder.as_markup()
 
 
 def get_crypto_wallet_kb() -> InlineKeyboardMarkup:
-    """Выбор сети в окне криптовалютных реквизитов."""
+    """Навигация с экрана адреса криптопополнения."""
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="🔵 USDT TRC20", callback_data="topup_crypto_auto"))
-    builder.row(InlineKeyboardButton(text="🟡 USDT BEP20", callback_data="topup_manual_usdt_bep20"))
-    builder.row(InlineKeyboardButton(text="💠 Ethereum ERC20", callback_data="topup_manual_eth"))
-    builder.row(InlineKeyboardButton(text="⚡️ Назад", callback_data="client_profile"))
+    builder.row(InlineKeyboardButton(text="🔁 Выбрать другую сеть", callback_data="topup_crypto_auto"))
+    builder.row(InlineKeyboardButton(text="↩️ К способам пополнения", callback_data="client_profile"))
+    return builder.as_markup()
+
+
+def get_crypto_networks_kb() -> InlineKeyboardMarkup:
+    """Три поддерживаемые сети для USDT-пополнения."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🟦 USDT · TRC20", callback_data="topup_manual_usdt_trc20"))
+    builder.row(InlineKeyboardButton(text="🔷 USDT · ERC20", callback_data="topup_manual_usdt_erc20"))
+    builder.row(InlineKeyboardButton(text="🟨 USDT · BEP20", callback_data="topup_manual_usdt_bep20"))
+    builder.row(InlineKeyboardButton(text="↩️ Назад", callback_data="client_profile"))
     return builder.as_markup()
 
 

@@ -1,0 +1,23 @@
+services:
+  - type: worker
+    name: bot-wonka
+    runtime: docker
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    numInstances: 1
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: DB_URL
+        fromDatabase:
+          name: bot-wonka-db
+          property: connectionString
+
+databases:
+  - name: bot-wonka-db
+    databaseName: bot_wonka
+    user: bot_wonka
+    plan: 0.1c-256mb

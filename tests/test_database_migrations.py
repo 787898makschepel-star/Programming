@@ -3,7 +3,22 @@ import asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from database.connection import _apply_city_reset_migration
+from database.connection import _apply_city_reset_migration, normalize_async_database_url
+
+
+def test_postgres_url_uses_asyncpg_driver():
+    url = normalize_async_database_url("postgresql://bot:secret@db.example.com:5432/bot_wonka")
+
+    assert url.drivername == "postgresql+asyncpg"
+    assert url.username == "bot"
+    assert url.password == "secret"
+    assert url.host == "db.example.com"
+    assert url.database == "bot_wonka"
+
+
+def test_existing_async_database_urls_are_preserved():
+    assert normalize_async_database_url("postgresql+asyncpg://bot@localhost/bot").drivername == "postgresql+asyncpg"
+    assert normalize_async_database_url("sqlite+aiosqlite:///data/bot.db").drivername == "sqlite+aiosqlite"
 
 
 def test_city_reset_migration_runs_only_once():

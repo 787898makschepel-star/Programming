@@ -139,6 +139,19 @@
    docker compose down
    ```
 
+### Способ 3: Развертывание на Render
+
+В корне проекта есть `render.yaml` для создания Docker Background Worker и PostgreSQL. Боту нужен постоянно работающий worker, потому что он получает обновления через Telegram long polling; Web Service с HTTP health-check здесь не используется.
+
+1. Запушьте проект в GitHub и создайте Blueprint на [Render Dashboard](https://dashboard.render.com/) через **New + → Blueprint**.
+2. Выберите репозиторий и ветку `master`, затем запустите создание сервисов по `render.yaml`.
+3. При настройке Blueprint укажите `BOT_TOKEN` и `ADMIN_IDS` (один или несколько Telegram ID через запятую). Дополнительные токены оплаты и `BOT_TOKEN_2` задаются в Environment только если они нужны.
+4. Дождитесь запуска worker и проверьте его логи в Render Dashboard. Данные хранятся в PostgreSQL, а `DB_URL` подключается к ней автоматически.
+
+Blueprint задает один worker, чтобы несколько экземпляров не конкурировали за Telegram long polling. Background Worker и production PostgreSQL используют платные планы Render; актуальную стоимость проверьте в Dashboard перед созданием ресурсов. Не заменяйте PostgreSQL на SQLite в файловой системе worker: локальные файлы не являются надежным постоянным хранилищем.
+
+Перед тем как принимать реальные заказы, проверьте и замените демонстрационный каталог: при первом запуске пустой базы бот автоматически добавляет стартовые товары и тестовые позиции из `database/seed_data.py`.
+
 ---
 
 ## 💳 Настройка способов оплаты

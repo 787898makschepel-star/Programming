@@ -1,10 +1,19 @@
 from sqlalchemy import text
+from sqlalchemy.engine import URL, make_url
 import os
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 from config import config
 
 CITY_RESET_MIGRATION_ID = "2026_09_reset_user_cities"
+
+
+def normalize_async_database_url(database_url: str) -> URL:
+    """Use the asyncpg driver for Render's standard PostgreSQL connection URL."""
+    url = make_url(database_url)
+    if url.drivername in {"postgres", "postgresql"}:
+        return url.set(drivername="postgresql+asyncpg")
+    return url
 
 # Если используется локальный SQLite, убедимся что папка для файла БД существует
 if config.DB_URL.startswith("sqlite"):
@@ -15,7 +24,7 @@ if config.DB_URL.startswith("sqlite"):
 
 # Создание асинхронного движка SQLAlchemy
 async_engine = create_async_engine(
-    config.DB_URL,
+    normalize_async_database_url(config.DB_URL),
     echo=False,
     future=True
 )

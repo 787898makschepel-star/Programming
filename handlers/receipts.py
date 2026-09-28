@@ -263,7 +263,7 @@ async def handle_user_receipt_submission(
         f"После подтверждения сумма в рублях будет зачислена на ваш баланс автоматически — вы получите уведомление."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌊 Главное меню", callback_data="to_main_menu")]
+        [InlineKeyboardButton(text="🍭 Главное меню", callback_data="to_main_menu")]
     ])
     await send_or_edit_screen(
         event=message, text=user_text,
@@ -331,7 +331,7 @@ async def cb_admin_reject_receipt(call: CallbackQuery, session: AsyncSession, bo
             ),
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🛟 Поддержка ↗", url=support_url)],
-                [InlineKeyboardButton(text="🌊 Главное меню", callback_data="to_main_menu")]
+                [InlineKeyboardButton(text="🍭 Главное меню", callback_data="to_main_menu")]
             ]),
             parse_mode="HTML"
         )
@@ -521,7 +521,7 @@ async def process_admin_rub_amount(message: Message, session: AsyncSession, bot:
             ),
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="🌊 Каталог",    callback_data="client_catalog"),
+                    InlineKeyboardButton(text="🍭 Каталог",    callback_data="client_catalog"),
                     InlineKeyboardButton(text="💰 Мой баланс", callback_data="client_profile"),
                 ],
                 [InlineKeyboardButton(text="🏠 Главное меню", callback_data="to_main_menu")]

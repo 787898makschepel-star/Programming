@@ -23,7 +23,7 @@ class CityState(StatesGroup):
 
 
 class CryptoTxState(StatesGroup):
-    """FSM ожидания чека или хэша транзакции USDT TRC20."""
+    """FSM ожидания чека или TxID для ручного пополнения USDT."""
     waiting_for_tx_hash = State()
     waiting_for_receipt = State()
 

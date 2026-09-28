@@ -45,11 +45,11 @@ def get_main_banner() -> FSInputFile | None:
 
 
 @router.message(CommandStart())
-@router.message(F.text == "🌊 Главное меню")
+@router.message(F.text == "🍭 Главное меню")
 async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot, session: AsyncSession):
     """
     Стартовая страница точь-в-точь как на скриншоте:
-    - Отправляет постоянную кнопку '🌊 Главное меню' внизу.
+    - Отправляет постоянную кнопку '🍭 Главное меню' внизу.
     - Выводит фирменный баннер METH WAVE с тюленем и кнопками.
     """
     start_text = message.text or ""
@@ -111,7 +111,7 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
         logger.debug("Failed to send startup sticker: %s", exc)
         await bot.send_message(
             chat_id=message.chat.id,
-            text="🌊",
+            text="🍭",
             reply_markup=get_game_reply_kb(),
         )
 
@@ -126,7 +126,7 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
     else:
         await bot.send_message(
             chat_id=message.chat.id,
-            text="🌊 <b>Главное меню</b>",
+            text="🍭 <b>Главное меню</b>",
             parse_mode="HTML",
             reply_markup=get_main_menu_kb(db_user),
             disable_web_page_preview=True,
@@ -282,7 +282,7 @@ async def process_city_input(message: Message, session: AsyncSession, db_user: U
             logger.debug("Failed to send startup sticker after city selection: %s", exc)
             await bot.send_message(
                 chat_id=message.chat.id,
-                text="🌊",
+                text="🍭",
                 reply_markup=get_game_reply_kb(),
             )
         await send_or_edit_screen(

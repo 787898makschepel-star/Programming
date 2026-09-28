@@ -14,7 +14,7 @@ def _read_mapping(raw: str) -> dict[str, str]:
         return {}
     if not isinstance(value, dict):
         return {}
-    return {str(key): str(item) for key, item in value.items() if item is not None}
+    return {str(key): str(item).replace("\U0001F30A", "🍭") for key, item in value.items() if item is not None}
 
 
 def _button_key(text: str, options: dict[str, Any], scope: str) -> str:

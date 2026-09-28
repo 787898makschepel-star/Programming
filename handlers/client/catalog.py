@@ -514,7 +514,7 @@ async def process_buy_candy(call: CallbackQuery, session: AsyncSession, db_user:
     text = build_waiting_for_coordinates_text(order_code, candy_name, qty_text, total_price, district)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚡️ Назад в ассортимент", callback_data="back_to_assortment")],
-        [InlineKeyboardButton(text="🌊 Главное меню", callback_data="to_main_menu")]
+        [InlineKeyboardButton(text="🍭 Главное меню", callback_data="to_main_menu")]
     ])
     photo = get_showcase_photo(candy)
 
