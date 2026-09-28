@@ -6,3 +6,4 @@ aiosqlite>=0.20.0
 asyncpg>=0.29.0
 python-dotenv>=1.0.1
 aiohttp>=3.9.5
+pyTelegramBotAPI>=4.20,<5
