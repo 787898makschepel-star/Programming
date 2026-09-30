@@ -454,7 +454,7 @@ async def show_referral_system(call: CallbackQuery, db_user: User, bot: Bot, sta
     referrals_count, referral_earnings = await get_referral_stats(session, db_user.id)
 
     text = (
-        f"🤝 <b>Реферальная программа METH WAVE</b>\n"
+        f"🤝 <b>Реферальная программа WILLI WONKA</b>\n"
         f"{DIVIDER}\n"
         f"Приглашайте друзей и зарабатывайте <b>5%</b> с каждой их покупки на свой баланс!\n\n"
         f"🔗 <b>Ваша личная ссылка:</b>\n"
