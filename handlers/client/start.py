@@ -270,17 +270,22 @@ async def process_city_input(message: Message, session: AsyncSession, db_user: U
     await delete_user_message(message)
 
     if city is None:
-        await send_or_edit_screen(
-            event=message,
+        # Город не найден — просим повторить, список НЕ показываем
+        await bot.send_message(
+            chat_id=message.chat.id,
             text=(
-                "❌ <b>Город не найден</b>\n"
+                f"❌ <b>Город написан неправильно</b>\n"
                 f"{DIVIDER}\n"
-                "Выберите город из списка или напишите точное название:"
+                "Такой город не найден. Проверьте написание и попробуйте ещё раз.\n"
+                "<i>Пример: Москва, Казань, Екатеринбург</i>"
             ),
-            reply_markup=get_city_select_kb(page=0),
-            state=state,
-            bot=bot,
+            parse_mode="HTML",
+            reply_markup=ForceReply(
+                input_field_placeholder="Введите название города",
+                selective=True,
+            ),
         )
+        # Состояние НЕ сбрасываем — ждём правильного ввода
         return
 
     db_user.city = city
