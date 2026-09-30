@@ -224,8 +224,8 @@ async def show_catalog_districts(call: CallbackQuery, session: AsyncSession, db_
 @router.callback_query(F.data.startswith("dist_"))
 async def open_district_catalog(call: CallbackQuery, session: AsyncSession, db_user: User, state: FSMContext):
     """
-    Вход в район: отображение экрана с 16 позициями ассортимента конфет со скриншота
-    и кнопкой '⚡️ Назад'.
+    Вход в район: валидируем через CITY_CODES (city_id) и district_index.
+    callback_data: dist_{city_id}_{district_index}
     """
     parts = split_callback_suffix(call.data, "dist_")
     if not parts or len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
@@ -233,15 +233,19 @@ async def open_district_catalog(call: CallbackQuery, session: AsyncSession, db_u
         return
 
     city = getattr(db_user, "city", "") or ""
-    city_code = int(parts[0])
+    callback_city_id = int(parts[0])
     district_index = int(parts[1])
-    if city not in CITY_DISTRICTS or CITY_CODES.get(city) != city_code:
-        await call.answer("Этот район недоступен для выбранного города.", show_alert=True)
+
+    # CITY_CODES после синхронизации с БД хранит city.id
+    if city not in CITY_DISTRICTS or CITY_CODES.get(city, -1) != callback_city_id:
+        await call.answer("Город изменился. Выберите район заново.", show_alert=True)
         return
+
     districts = CITY_DISTRICTS[city]
     if district_index >= len(districts):
-        await call.answer("Этот район недоступен для выбранного города.", show_alert=True)
+        await call.answer("Район недоступен. Возможно, он был удалён. Откройте каталог заново.", show_alert=True)
         return
+
     district = districts[district_index]
 
     db_user.district = district

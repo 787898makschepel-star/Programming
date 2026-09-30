@@ -13,9 +13,11 @@ from .models import (
     Transaction,
     ProductType,
     OrderStatus,
-    PaymentStatus
-    ,ReferralReward
-    , ShowcaseProduct
+    PaymentStatus,
+    ReferralReward,
+    ShowcaseProduct,
+    City,
+    District,
 )
 
 REFERRAL_RATE = 0.05
@@ -604,3 +606,173 @@ async def get_top_products(session: AsyncSession, limit: int = 5) -> List[Tuple[
     )
     result = await session.execute(query)
     return [(row[0], row[1], round(row[2] or 0.0, 2)) for row in result.all()]
+
+
+# -------------------------------------------------------------
+# 🏙️ ГОРОДА И РАЙОНЫ
+# -------------------------------------------------------------
+
+async def get_all_cities(session: AsyncSession, only_active: bool = True) -> List[City]:
+    """Возвращает список всех городов с подгруженными районами."""
+    query = select(City).options(selectinload(City.districts)).order_by(City.id)
+    if only_active:
+        query = query.where(City.is_active == True)
+    return list((await session.execute(query)).scalars().all())
+
+
+async def get_city_by_id(session: AsyncSession, city_id: int) -> Optional[City]:
+    """Получить город по ID вместе с районами."""
+    query = select(City).where(City.id == city_id).options(selectinload(City.districts))
+    return (await session.execute(query)).scalar_one_or_none()
+
+
+async def get_city_by_name(session: AsyncSession, name: str) -> Optional[City]:
+    """Получить город по имени (без учета регистра) с районами."""
+    normalized = name.strip()
+    query = (
+        select(City)
+        .where(func.lower(City.name) == normalized.lower())
+        .options(selectinload(City.districts))
+    )
+    return (await session.execute(query)).scalar_one_or_none()
+
+
+async def create_city(session: AsyncSession, name: str) -> City:
+    """Создать новый город и синхронизировать кэш."""
+    clean_name = name.strip()
+    existing = await get_city_by_name(session, clean_name)
+    if existing:
+        if not existing.is_active:
+            existing.is_active = True
+            await session.commit()
+            await session.refresh(existing)
+            await sync_city_districts_cache(session)
+        return existing
+
+    city = City(name=clean_name, is_active=True)
+    session.add(city)
+    await session.commit()
+    await session.refresh(city)
+    await sync_city_districts_cache(session)
+    return city
+
+
+async def delete_city(session: AsyncSession, city_id: int) -> bool:
+    """Удалить город и все его районы, затем синхронизировать кэш."""
+    city = await get_city_by_id(session, city_id)
+    if not city:
+        return False
+    await session.delete(city)
+    await session.commit()
+    await sync_city_districts_cache(session)
+    return True
+
+
+async def get_city_districts(session: AsyncSession, city_id: int, only_active: bool = True) -> List[District]:
+    """Получить все районы конкретного города."""
+    query = select(District).where(District.city_id == city_id).order_by(District.id)
+    if only_active:
+        query = query.where(District.is_active == True)
+    return list((await session.execute(query)).scalars().all())
+
+
+async def get_district_by_id(session: AsyncSession, district_id: int) -> Optional[District]:
+    """Получить район по ID."""
+    return await session.get(District, district_id)
+
+
+async def add_district(session: AsyncSession, city_id: int, name: str) -> District:
+    """Добавить район к городу и синхронизировать кэш."""
+    clean_name = name.strip()
+    query = select(District).where(
+        and_(
+            District.city_id == city_id,
+            func.lower(District.name) == clean_name.lower()
+        )
+    )
+    existing = (await session.execute(query)).scalar_one_or_none()
+    if existing:
+        if not existing.is_active:
+            existing.is_active = True
+            await session.commit()
+            await session.refresh(existing)
+            await sync_city_districts_cache(session)
+        return existing
+
+    district = District(city_id=city_id, name=clean_name, is_active=True)
+    session.add(district)
+    await session.commit()
+    await session.refresh(district)
+    await sync_city_districts_cache(session)
+    return district
+
+
+async def rename_city(session: AsyncSession, city_id: int, new_name: str) -> Optional[City]:
+    """Переименовать город. Возвращает объект или None если город не найден."""
+    clean_name = new_name.strip()
+    city = await get_city_by_id(session, city_id)
+    if not city:
+        return None
+    # Проверяем, не занят ли это имя другим городом
+    duplicate = await get_city_by_name(session, clean_name)
+    if duplicate and duplicate.id != city_id:
+        return None  # имя уже занят
+    city.name = clean_name
+    await session.commit()
+    await session.refresh(city)
+    await sync_city_districts_cache(session)
+    return city
+
+
+async def rename_district(session: AsyncSession, district_id: int, new_name: str) -> Optional[District]:
+    """Переименовать район. Возвращает объект или None если не найден."""
+    clean_name = new_name.strip()
+    district = await get_district_by_id(session, district_id)
+    if not district:
+        return None
+    # Проверяем уникальность в рамках города
+    query = select(District).where(
+        and_(
+            District.city_id == district.city_id,
+            District.id != district_id,
+            func.lower(District.name) == clean_name.lower()
+        )
+    )
+    duplicate = (await session.execute(query)).scalar_one_or_none()
+    if duplicate:
+        return None  # уже есть такой район
+    district.name = clean_name
+    await session.commit()
+    await session.refresh(district)
+    await sync_city_districts_cache(session)
+    return district
+
+
+async def delete_district(session: AsyncSession, district_id: int) -> bool:
+    """Удалить район из города и синхронизировать кэш."""
+    district = await get_district_by_id(session, district_id)
+    if not district:
+        return False
+    await session.delete(district)
+    await session.commit()
+    await sync_city_districts_cache(session)
+    return True
+
+
+async def sync_city_districts_cache(session: AsyncSession) -> None:
+    """
+    Синхронизирует in-memory словари CITY_DISTRICTS и CITY_CODES
+    в keyboards.inline_client с данными из БД.
+    """
+    from keyboards.inline_client import CITY_DISTRICTS, CITY_CODES
+    cities = await get_all_cities(session, only_active=True)
+    if not cities:
+        return
+
+    CITY_DISTRICTS.clear()
+    CITY_CODES.clear()
+    for city in cities:
+        active_districts = [d.name for d in city.districts if d.is_active]
+        CITY_DISTRICTS[city.name] = active_districts
+        CITY_CODES[city.name] = city.id
+

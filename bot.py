@@ -33,7 +33,11 @@ async def on_startup(bot: Bot):
         await seed_initial_catalog(session)
         from database.seed_data import seed_showcase_catalog
         await seed_showcase_catalog(session)
-    logger.info("База данных успешно инициализирована и наполнена товарами.")
+        from database.seed_data import seed_initial_cities
+        await seed_initial_cities(session)
+        from database.crud import sync_city_districts_cache
+        await sync_city_districts_cache(session)
+    logger.info("База данных успешно инициализирована, наполнены товары, города и районы.")
 
     # Оповещение администраторов
     for admin_id in config.ADMIN_IDS:

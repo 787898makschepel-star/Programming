@@ -190,3 +190,39 @@ class Transaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship("User", back_populates="transactions")
+
+
+class City(Base):
+    """Город, доступный для выбора клиентами и привязки районов."""
+    __tablename__ = "cities"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    districts: Mapped[List["District"]] = relationship(
+        "District",
+        back_populates="city",
+        cascade="all, delete-orphan",
+        order_by="District.id"
+    )
+
+    def __repr__(self) -> str:
+        return f"<City id={self.id} name='{self.name}'>"
+
+
+class District(Base):
+    """Район города для оформления заказов."""
+    __tablename__ = "districts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    city_id: Mapped[int] = mapped_column(ForeignKey("cities.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    city: Mapped["City"] = relationship("City", back_populates="districts")
+
+    def __repr__(self) -> str:
+        return f"<District id={self.id} city_id={self.city_id} name='{self.name}'>"

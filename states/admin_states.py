@@ -60,3 +60,11 @@ class AdminReceiptState(StatesGroup):
     """FSM ожидания суммы в рублях от администратора для чека."""
     waiting_for_amount = State()
 
+
+class CityMgmtState(StatesGroup):
+    """FSM управления городами и районами (добавление, переименование)."""
+    waiting_for_city_name = State()           # ввод имени нового города
+    waiting_for_districts = State()           # ввод районов (для нового города или добавления)
+    waiting_for_new_city_name = State()       # переименование города
+    waiting_for_new_district_name = State()   # переименование района
+

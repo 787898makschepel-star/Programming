@@ -1,7 +1,7 @@
 from typing import List
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton as TelegramInlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from database.models import Category, Product
+from database.models import Category, Product, City, District
 from config import config
 from utils.button_settings import registered_buttons, resolve_button
 
@@ -25,6 +25,9 @@ def get_admin_main_kb() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="🛍️ Товары", callback_data="adm_showcase")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🏙️ Города и районы", callback_data="adm_cities")
     )
     builder.row(
         InlineKeyboardButton(text="⚙️ Настройки бота", callback_data="adm_settings")
@@ -216,3 +219,121 @@ def get_broadcast_confirm_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="❌ Отменить", callback_data="adm_cancel_broadcast")
     )
     return builder.as_markup()
+
+
+# -------------------------------------------------------------
+# 🏙️ КЛАВИАТУРЫ УПРАВЛЕНИЯ ГОРОДАМИ И РАЙОНАМИ
+# -------------------------------------------------------------
+
+def get_admin_cities_kb(cities: List[City], page: int = 0) -> InlineKeyboardMarkup:
+    """Список городов для администратора с пагинацией."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить город", callback_data="adm_city_add")
+    )
+
+    page_size = 8
+    total_pages = max(1, (len(cities) + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+
+    start = page * page_size
+    current_cities = cities[start : start + page_size]
+
+    for city in current_cities:
+        dist_count = len([d for d in city.districts if d.is_active])
+        builder.row(
+            InlineKeyboardButton(
+                text=f"📍 {city.name} ({dist_count} р-нов)",
+                callback_data=f"adm_city_view_{city.id}"
+            )
+        )
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_cities_page_{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"adm_cities_page_{page + 1}"))
+    if nav_row:
+        builder.row(*nav_row)
+
+    builder.row(InlineKeyboardButton(text="🔙 В админку", callback_data="adm_main"))
+    return builder.as_markup()
+
+
+def get_admin_city_view_kb(city: City, districts: List[District], page: int = 0) -> InlineKeyboardMarkup:
+    """Экран города со списком районов, управлением (редактировать/удалить каждый) и кнопками добавления."""
+    builder = InlineKeyboardBuilder()
+
+    # --- действия с городом ---
+    builder.row(
+        InlineKeyboardButton(text="✏️ Переименовать город", callback_data=f"adm_city_rename_{city.id}"),
+        InlineKeyboardButton(text="🗑 Удалить город", callback_data=f"adm_city_del_{city.id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить район(ы)", callback_data=f"adm_dist_add_{city.id}")
+    )
+
+    # --- список районов с пагинацией ---
+    page_size = 6
+    total_pages = max(1, (len(districts) + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+    start = page * page_size
+    current_districts = districts[start: start + page_size]
+
+    for dist in current_districts:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"📍 {dist.name}",
+                callback_data=f"adm_dist_rename_{dist.id}"
+            ),
+            InlineKeyboardButton(text="✏️", callback_data=f"adm_dist_rename_{dist.id}"),
+            InlineKeyboardButton(text="🗑", callback_data=f"adm_dist_del_{dist.id}")
+        )
+
+    # --- навигация по страницам ---
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(text="⬅️", callback_data=f"adm_dist_page_{city.id}_{page - 1}"))
+    if total_pages > 1:
+        nav_row.append(InlineKeyboardButton(text=f"📄 {page + 1}/{total_pages}", callback_data="adm_noop"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(text="➡️", callback_data=f"adm_dist_page_{city.id}_{page + 1}"))
+    if nav_row:
+        builder.row(*nav_row)
+
+    builder.row(InlineKeyboardButton(text="🔙 К списку городов", callback_data="adm_cities"))
+    return builder.as_markup()
+
+
+def get_admin_city_del_confirm_kb(city_id: int) -> InlineKeyboardMarkup:
+    """Подтверждение удаления города."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🗑 Да, удалить город", callback_data=f"adm_city_confirm_del_{city_id}"),
+            InlineKeyboardButton(text="↩️ Отмена", callback_data=f"adm_city_view_{city_id}"),
+        ]
+    ])
+
+
+def get_admin_dist_del_confirm_kb(district_id: int, city_id: int) -> InlineKeyboardMarkup:
+    """Подтверждение удаления района."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🗑 Да, удалить район", callback_data=f"adm_dist_confirm_del_{district_id}"),
+            InlineKeyboardButton(text="↩️ Отмена", callback_data=f"adm_city_view_{city_id}"),
+        ]
+    ])
+
+
+def get_admin_city_rename_kb(city_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура отмены переименования города."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="↩️ Отмена", callback_data=f"adm_city_view_{city_id}")]
+    ])
+
+
+def get_admin_dist_rename_kb(district_id: int, city_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура отмены переименования района."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="↩️ Отмена", callback_data=f"adm_city_view_{city_id}")]
+    ])

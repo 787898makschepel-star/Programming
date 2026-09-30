@@ -12,6 +12,7 @@ from keyboards.inline_client import (
     get_main_menu_kb,
     get_game_reply_kb,
     get_districts_kb,
+    get_city_select_kb,
     get_back_to_menu_kb,
     CITY_DISTRICTS,
     InlineKeyboardButton
@@ -210,26 +211,47 @@ async def cb_main_menu(call: CallbackQuery, db_user: User, state: FSMContext, bo
 
 @router.callback_query(F.data == "client_city")
 async def show_city_selection(call: CallbackQuery, db_user: User, state: FSMContext):
-    """Запрашивает город текстом перед открытием каталога."""
+    """Показывает клавиатуру выбора города кнопками (не текстом)."""
     current_city = getattr(db_user, "city", "") or "не выбран"
     await state.set_state(CityState.waiting_for_city)
     if not db_user.city:
         await state.update_data(onboarding_after_captcha=True)
-    await call.answer("Напишите город для выбора ассортимента.", show_alert=True)
+    await call.answer()
     text = (
         f"📍 <b>Выбор вашего города</b>\n"
         f"{DIVIDER}\n"
         f"Текущий выбранный город: <b>{current_city}</b>\n\n"
-        "Напишите город сообщением, чтобы выбрать ассортимент:"
+        "Выберите город из списка или напишите его сообщением:"
     )
     await send_or_edit_screen(
         event=call,
         text=text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="to_main_menu")]
-        ]),
+        reply_markup=get_city_select_kb(page=0),
         state=state,
     )
+
+
+@router.callback_query(F.data.startswith("city_page_"))
+async def paginate_city_select(call: CallbackQuery, db_user: User, state: FSMContext):
+    """Перелистывание страниц списка городов."""
+    try:
+        page = int((call.data or "").split("city_page_", 1)[1])
+    except (IndexError, ValueError):
+        page = 0
+    current_city = getattr(db_user, "city", "") or "не выбран"
+    text = (
+        f"📍 <b>Выбор вашего города</b>\n"
+        f"{DIVIDER}\n"
+        f"Текущий выбранный город: <b>{current_city}</b>\n\n"
+        "Выберите город из списка:"
+    )
+    await send_or_edit_screen(
+        event=call,
+        text=text,
+        reply_markup=get_city_select_kb(page=page),
+        state=state,
+    )
+    await call.answer()
 
 
 @router.message(CityState.waiting_for_city)
@@ -253,11 +275,9 @@ async def process_city_input(message: Message, session: AsyncSession, db_user: U
             text=(
                 "❌ <b>Город не найден</b>\n"
                 f"{DIVIDER}\n"
-                "Напишите город точно как в списке доступных городов."
+                "Выберите город из списка или напишите точное название:"
             ),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="to_main_menu")]
-            ]),
+            reply_markup=get_city_select_kb(page=0),
             state=state,
             bot=bot,
         )

@@ -1,7 +1,7 @@
 import logging
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.models import Category, Product, ProductItem, ProductType, ShowcaseProduct
+from database.models import Category, Product, ProductItem, ProductType, ShowcaseProduct, City, District
 
 logger = logging.getLogger(__name__)
 
@@ -211,3 +211,25 @@ async def seed_initial_catalog(session: AsyncSession) -> None:
 
     await session.commit()
     logger.info("Каталог @mwavesrobot успешно наполнен товарами и складом!")
+
+
+async def seed_initial_cities(session: AsyncSession) -> None:
+    """
+    Наполняет базу данных начальным списком городов и районов,
+    если таблица городов пуста.
+    """
+    city_count = (await session.execute(select(func.count(City.id)))).scalar() or 0
+    if city_count > 0:
+        return
+
+    logger.info("Начальное заполнение городов и районов...")
+    from keyboards.inline_client import DEFAULT_CITY_DISTRICTS
+    for city_name, district_names in DEFAULT_CITY_DISTRICTS.items():
+        city = City(name=city_name, is_active=True)
+        session.add(city)
+        await session.flush()
+        for dist_name in district_names:
+            district = District(city_id=city.id, name=dist_name, is_active=True)
+            session.add(district)
+    await session.commit()
+    logger.info("Города и районы успешно инициализированы в БД (%d городов).", len(DEFAULT_CITY_DISTRICTS))

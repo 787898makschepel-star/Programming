@@ -17,7 +17,7 @@ def InlineKeyboardButton(*, text: str, scope: str = "client", **kwargs):
         kwargs.setdefault("icon_custom_emoji_id", emoji_id)
     return TelegramInlineKeyboardButton(text=text, **kwargs)
 
-CITY_DISTRICTS: Dict[str, List[str]] = {
+DEFAULT_CITY_DISTRICTS: Dict[str, List[str]] = {
     "Москва": [
         "Центральный",
         "Северный",
@@ -59,7 +59,8 @@ CITY_DISTRICTS: Dict[str, List[str]] = {
     "Новосибирск": ["Дзержинский", "Железнодорожный", "Заельцовский", "Калининский", "Кировский", "Ленинский", "Октябрьский", "Первомайский", "Советский", "Центральный"],
 }
 
-CITY_CODES = {city: index for index, city in enumerate(CITY_DISTRICTS)}
+CITY_DISTRICTS: Dict[str, List[str]] = dict(DEFAULT_CITY_DISTRICTS)
+CITY_CODES: Dict[str, int] = {city: index for index, city in enumerate(CITY_DISTRICTS)}
 
 
 def get_game_reply_kb() -> ReplyKeyboardMarkup:
@@ -135,28 +136,41 @@ def get_main_menu_kb(user: Optional[User] = None) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_city_select_kb() -> InlineKeyboardMarkup:
-    """Список городов, доступных для оформления заказа."""
+def get_city_select_kb(page: int = 0) -> InlineKeyboardMarkup:
+    """Список городов, доступных для оформления заказа, с поддержкой страниц."""
     builder = InlineKeyboardBuilder()
-    for city in CITY_DISTRICTS:
+    cities = list(CITY_DISTRICTS.keys())
+    page_size = 10
+    total_pages = max(1, (len(cities) + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+
+    start = page * page_size
+    current_cities = cities[start : start + page_size]
+    for city in current_cities:
         builder.button(text=f"📍 {city}", callback_data=f"set_city_{city}")
     builder.adjust(2)
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"city_page_{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"city_page_{page + 1}"))
+    if nav_row:
+        builder.row(*nav_row)
+
     builder.row(InlineKeyboardButton(text="⚡️ Назад", callback_data="to_main_menu"))
     return builder.as_markup()
 
 
 def get_districts_kb(city: str = "") -> InlineKeyboardMarkup:
     """
-    Точная копия экрана районов со скриншота пользователя:
-    📍 Центральный
-    📍 Северный
-    ...
-    ⚡️ Назад
+    Клавиатура выбора района.
+    callback_data: dist_{city_id}_{district_index}
+    city_id берётся из CITY_CODES (после синхронизации = id в БД).
+    district_index — порядковый номер района в списке CITY_DISTRICTS[city].
     """
     districts = CITY_DISTRICTS.get(city, [])
-    city_code = CITY_CODES.get(city)
-    if city_code is None:
-        city_code = -1
+    city_code = CITY_CODES.get(city, -1)
     builder = InlineKeyboardBuilder()
 
     for district_index, district in enumerate(districts):
