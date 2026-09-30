@@ -1,6 +1,6 @@
 from aiogram import Router, F, Bot
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,9 +11,11 @@ from keyboards.inline_admin import (
     get_admin_main_kb,
     get_stats_period_kb,
     get_admin_settings_kb,
+    get_admin_cities_kb,
+    get_showcase_admin_kb,
     InlineKeyboardButton,
 )
-from keyboards.inline_client import get_bottom_reply_kb
+from keyboards.inline_client import get_bottom_reply_kb, get_main_menu_kb
 from keyboards.reply_admin import (
     get_admin_reply_kb,
     BTN_ADM_PANEL,
@@ -27,14 +29,13 @@ from keyboards.reply_admin import (
 )
 from states.admin_states import UserSearchState, BroadcastState
 from utils.ui_cleaner import send_or_edit_screen, delete_user_message
-from utils.formatters import format_admin_dashboard, format_admin_stats, DIVIDER
-from aiogram.types import InlineKeyboardMarkup
+from utils.formatters import format_admin_dashboard, DIVIDER
 
 router = Router(name="admin_base")
 
 
 # ──────────────────────────────────────────────────────────
-#  /admin, /panel — вход в панель
+#  /unban — разблокировка пользователя
 # ──────────────────────────────────────────────────────────
 
 @router.message(Command("unban"))
@@ -73,18 +74,32 @@ async def cmd_unban_user(
     )
 
 
+# ──────────────────────────────────────────────────────────
+#  /admin, /panel — вход в панель
+# ──────────────────────────────────────────────────────────
+
 @router.message(Command("admin", "panel"))
-async def cmd_admin_panel(message: Message, state: FSMContext):
-    """Вход в панель администратора: удаляет команду и выводит чистый экран."""
+async def cmd_admin_panel(message: Message, state: FSMContext, bot: Bot):
+    """Вход в панель администратора."""
     await delete_user_message(message)
     await state.clear()
-    text = format_admin_dashboard()
-    await message.answer(
-        "🛠️ <b>Добро пожаловать в панель управления!</b>\n"
-        "Используйте кнопки ниже для навигации.",
+
+    # Устанавливаем админскую Reply Keyboard + выводим инлайн-дашборд одним сообщением
+    sent = await bot.send_message(
+        chat_id=message.chat.id,
+        text=format_admin_dashboard(),
+        parse_mode="HTML",
+        reply_markup=get_admin_main_kb(),
+        disable_web_page_preview=True,
+    )
+    # Отдельным шагом — устанавливаем Reply Keyboard (пустое служебное сообщение → удаляем)
+    kb_msg = await bot.send_message(
+        chat_id=message.chat.id,
+        text="🛠️ <b>Панель управления активна.</b> Используйте кнопки ниже.",
+        parse_mode="HTML",
         reply_markup=get_admin_reply_kb(),
     )
-    await send_or_edit_screen(message, text, reply_markup=get_admin_main_kb(), state=state)
+    await state.update_data({"last_screen_message_id": sent.message_id})
 
 
 @router.callback_query(F.data == "adm_main")
@@ -101,90 +116,111 @@ async def cb_admin_main(call: CallbackQuery, state: FSMContext):
 # ──────────────────────────────────────────────────────────
 
 @router.message(F.text == BTN_ADM_PANEL)
-async def reply_admin_panel(message: Message, state: FSMContext):
+async def reply_admin_panel(message: Message, state: FSMContext, bot: Bot):
     """🛠 Панель управления — главное инлайн-меню администратора."""
+    await delete_user_message(message)
     await state.clear()
-    text = format_admin_dashboard()
-    await send_or_edit_screen(message, text, reply_markup=get_admin_main_kb(), state=state)
+    await send_or_edit_screen(
+        message,
+        format_admin_dashboard(),
+        reply_markup=get_admin_main_kb(),
+        state=state,
+        bot=bot,
+    )
 
 
 @router.message(F.text == BTN_ADM_USERS)
-async def reply_admin_users(message: Message, state: FSMContext):
+async def reply_admin_users(message: Message, state: FSMContext, bot: Bot):
     """👥 Пользователи — переход к поиску клиента."""
+    await delete_user_message(message)
     await state.set_state(UserSearchState.waiting_for_query)
     cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ В админку", callback_data="adm_main")]
     ])
-    text = (
-        f"👥 <b>Управление клиентами</b>\n"
-        f"{DIVIDER}\n"
-        f"Отправьте <b>Telegram ID</b> или <b>@username</b> пользователя для поиска:"
+    await send_or_edit_screen(
+        message,
+        f"👥 <b>Управление клиентами</b>\n{DIVIDER}\n"
+        "Отправьте <b>Telegram ID</b> или <b>@username</b> пользователя для поиска:",
+        reply_markup=cancel_kb,
+        state=state,
+        bot=bot,
     )
-    await send_or_edit_screen(message, text, reply_markup=cancel_kb, state=state)
 
 
 @router.message(F.text == BTN_ADM_STATS)
-async def reply_admin_stats(message: Message, state: FSMContext):
+async def reply_admin_stats(message: Message, state: FSMContext, bot: Bot):
     """📊 Статистика — выбор периода аналитики."""
+    await delete_user_message(message)
     await state.clear()
-    text = (
-        f"📊 <b>Статистика и аналитика продаж</b>\n"
-        f"{DIVIDER}\n"
-        f"Выберите временной период для формирования сводки:"
+    await send_or_edit_screen(
+        message,
+        f"📊 <b>Статистика и аналитика продаж</b>\n{DIVIDER}\n"
+        "Выберите временной период для формирования сводки:",
+        reply_markup=get_stats_period_kb(),
+        state=state,
+        bot=bot,
     )
-    await send_or_edit_screen(message, text, reply_markup=get_stats_period_kb(), state=state)
 
 
 @router.message(F.text == BTN_ADM_BROADCAST)
-async def reply_admin_broadcast(message: Message, state: FSMContext):
+async def reply_admin_broadcast(message: Message, state: FSMContext, bot: Bot):
     """📢 Рассылка — начало создания рассылки."""
+    await delete_user_message(message)
     await state.set_state(BroadcastState.waiting_for_content)
     cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Отмена", callback_data="adm_cancel_broadcast")]
     ])
-    text = (
-        f"📢 <b>Создание рассылки</b>\n"
-        f"{DIVIDER}\n"
+    await send_or_edit_screen(
+        message,
+        f"📢 <b>Создание рассылки</b>\n{DIVIDER}\n"
         "Отправьте сообщение для рассылки всем пользователям.\n"
-        "Поддерживаются текст, фото, видео, документы."
+        "Поддерживаются текст, фото, видео, документы.",
+        reply_markup=cancel_kb,
+        state=state,
+        bot=bot,
     )
-    await send_or_edit_screen(message, text, reply_markup=cancel_kb, state=state)
 
 
 @router.message(F.text == BTN_ADM_CITIES)
-async def reply_admin_cities(message: Message, state: FSMContext, session: AsyncSession):
+async def reply_admin_cities(message: Message, state: FSMContext, session: AsyncSession, bot: Bot):
     """🏙️ Города — управление городами и районами."""
+    await delete_user_message(message)
     await state.clear()
     from database.crud import get_all_cities
     cities = await get_all_cities(session)
-    text = (
-        f"🏙️ <b>Управление городами и районами</b>\n"
-        f"{DIVIDER}\n"
-        f"Всего городов: <b>{len(cities)}</b>"
+    await send_or_edit_screen(
+        message,
+        f"🏙️ <b>Управление городами и районами</b>\n{DIVIDER}\n"
+        f"Всего городов: <b>{len(cities)}</b>",
+        reply_markup=get_admin_cities_kb(cities),
+        state=state,
+        bot=bot,
     )
-    await send_or_edit_screen(message, text, reply_markup=get_admin_cities_kb(cities), state=state)
 
 
 @router.message(F.text == BTN_ADM_SHOWCASE)
-async def reply_admin_showcase(message: Message, state: FSMContext, session: AsyncSession):
+async def reply_admin_showcase(message: Message, state: FSMContext, session: AsyncSession, bot: Bot):
     """🛍️ Товары — управление витриной."""
+    await delete_user_message(message)
     await state.clear()
     from database.crud import get_showcase_products
     products = await get_showcase_products(session)
-    from keyboards.inline_admin import get_showcase_admin_kb
-    text = (
-        f"🛍️ <b>Витрина товаров</b>\n"
-        f"{DIVIDER}\n"
-        f"Товаров в витрине: <b>{len(products)}</b>"
+    await send_or_edit_screen(
+        message,
+        f"🛍️ <b>Витрина товаров</b>\n{DIVIDER}\n"
+        f"Товаров в витрине: <b>{len(products)}</b>",
+        reply_markup=get_showcase_admin_kb(products),
+        state=state,
+        bot=bot,
     )
-    await send_or_edit_screen(message, text, reply_markup=get_showcase_admin_kb(products), state=state)
 
 
 @router.message(F.text == BTN_ADM_SETTINGS)
-async def reply_admin_settings(message: Message, state: FSMContext):
+async def reply_admin_settings(message: Message, state: FSMContext, bot: Bot):
     """⚙️ Настройки — конфигурация бота."""
+    await delete_user_message(message)
     await state.clear()
-    from config import config as cfg
+    cfg = config
     text = (
         f"⚙️ <b>Настройки бота</b>\n"
         f"{DIVIDER}\n"
@@ -194,25 +230,45 @@ async def reply_admin_settings(message: Message, state: FSMContext):
         f"📖 <b>FAQ:</b> <code>{cfg.FAQ_URL or 'не задано'}</code>\n"
         f"🧾 <b>Группа чеков:</b> <code>{cfg.RECEIPTS_GROUP_ID}</code>\n"
         f"💳 <b>CryptoBot:</b> {'🟢 подключен' if cfg.CRYPTO_BOT_TOKEN else '⚪ не настроен'}\n"
-        f"💳 <b>Банковская оплата:</b> {'🟢 подключена' if cfg.TELEGRAM_PAYMENT_PROVIDER_TOKEN else '⚪ не настроена'}\n"
+        f"💳 <b>Банковская оплата:</b> "
+        f"{'🟢 подключена' if cfg.TELEGRAM_PAYMENT_PROVIDER_TOKEN else '⚪ не настроена'}\n"
         f"{DIVIDER}\n"
         "Для изменения параметров обновите <code>.env</code> и перезапустите бота."
     )
-    await send_or_edit_screen(message, text, reply_markup=get_admin_settings_kb(), state=state)
+    await send_or_edit_screen(
+        message,
+        text,
+        reply_markup=get_admin_settings_kb(),
+        state=state,
+        bot=bot,
+    )
 
 
 @router.message(F.text == BTN_ADM_MAIN_MENU)
-async def reply_to_client_menu(message: Message, state: FSMContext):
+async def reply_to_client_menu(message: Message, state: FSMContext, bot: Bot, db_user):
     """◀️ В клиентское меню — возврат к клиентской панели."""
+    await delete_user_message(message)
     await state.clear()
-    from keyboards.inline_client import get_main_menu_kb
-    await message.answer(
-        "◀️ <b>Клиентское меню</b>",
+
+    # Показываем клиентское главное меню в чистом виде.
+    # Reply Keyboard переключаем на клиентский вариант (с кнопкой /admin для админа).
+    # Получаем данные пользователя если есть (middleware может не передавать db_user)
+    from handlers.client.start import get_main_banner
+    banner = get_main_banner()
+
+    # Переключаем reply-клавиатуру на клиентскую (с доступом /admin для удобства)
+    await bot.send_message(
+        chat_id=message.chat.id,
+        text="👋",
         reply_markup=get_bottom_reply_kb(is_admin=True),
     )
+
+    # Отправляем инлайн-меню клиента
     await send_or_edit_screen(
         message,
-        "👋 Главное меню",
-        reply_markup=get_main_menu_kb(),
+        "🍭 <b>Главное меню</b>",
+        reply_markup=get_main_menu_kb(db_user),
+        photo=banner,
         state=state,
+        bot=bot,
     )
