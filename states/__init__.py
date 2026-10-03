@@ -1,4 +1,4 @@
-from .client_states import TopUpState, DirectBuyState
+from .client_states import TopUpState, DirectBuyState, CaptchaState
 from .admin_states import (
     AddCategoryState,
     UploadStockState,
@@ -11,6 +11,7 @@ from .admin_states import (
 __all__ = [
     "TopUpState",
     "DirectBuyState",
+    "CaptchaState",
     "AddCategoryState",
     "UploadStockState",
     "EditPriceState",

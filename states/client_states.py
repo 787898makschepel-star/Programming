@@ -27,3 +27,8 @@ class CryptoTxState(StatesGroup):
     waiting_for_tx_hash = State()
     waiting_for_receipt = State()
 
+
+class CaptchaState(StatesGroup):
+    """FSM состояния для решения математической капчи."""
+    waiting_for_answer = State()
+

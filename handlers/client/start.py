@@ -21,7 +21,7 @@ from utils.callback_parser import parse_callback_suffix
 from states.client_states import CityState, PromoState
 from utils.ui_cleaner import send_or_edit_screen, delete_user_message
 from utils.formatters import format_faq, DIVIDER
-from handlers.emoji_captcha import send_start_captcha
+from handlers.captcha import send_math_captcha, send_start_captcha
 
 router = Router(name="client_start")
 
@@ -45,13 +45,54 @@ def get_main_banner() -> FSInputFile | None:
     return None
 
 
+async def show_verified_main_menu(
+    event: Message | CallbackQuery,
+    db_user: User,
+    state: FSMContext,
+    bot: Bot,
+) -> None:
+    """Отображает стикер и баннер главного меню для верифицированного пользователя."""
+    chat_id = event.chat.id if isinstance(event, Message) else event.message.chat.id
+    try:
+        await bot.send_sticker(
+            chat_id=chat_id,
+            sticker=get_start_sticker_id(),
+            reply_markup=get_game_reply_kb(),
+        )
+    except Exception as exc:
+        logger = __import__("logging").getLogger(__name__)
+        logger.debug("Failed to send startup sticker: %s", exc)
+        await bot.send_message(
+            chat_id=chat_id,
+            text="🍭",
+            reply_markup=get_game_reply_kb(),
+        )
+
+    banner = get_main_banner()
+    if banner:
+        await bot.send_photo(
+            chat_id=chat_id,
+            photo=banner,
+            caption=None,
+            reply_markup=get_main_menu_kb(db_user),
+        )
+    else:
+        await bot.send_message(
+            chat_id=chat_id,
+            text="🍭 <b>Главное меню</b>",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_kb(db_user),
+            disable_web_page_preview=True,
+        )
+
+
 @router.message(CommandStart())
 @router.message(F.text == "🍭 Главное меню")
 async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot, session: AsyncSession):
     """
-    Стартовая страница точь-в-точь как на скриншоте:
-    - Отправляет постоянную кнопку '🍭 Главное меню' внизу.
-    - Выводит фирменный баннер METH WAVE с тюленем и кнопками.
+    Стартовая страница магазина:
+    - Неверифицированному пользователю отправляется математическая капча для ручного ввода.
+    - После успешного решения открывается выбор города (если новый) или главное меню.
     """
     start_text = message.text or ""
     is_start_command = start_text.startswith("/start")
@@ -61,19 +102,27 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
         if not db_user.start_pending:
             db_user.start_pending = True
             await session.commit()
+            await delete_user_message(message)
             return
 
         db_user.start_pending = False
         await session.commit()
 
+    # 1. Если капча еще НЕ пройдена — требуем решение примера
     if not db_user.captcha_passed:
         if not is_start_command:
             return
+        if is_start_command and len(start_text.split(maxsplit=1)) > 1:
+            payload = start_text.split(maxsplit=1)[1].strip()
+            if payload.startswith("ref") and payload[3:].isdigit():
+                await state.update_data(pending_referrer_id=int(payload[3:]))
+
         await state.clear()
         await delete_user_message(message)
-        await send_start_captcha(bot, message.chat.id, db_user)
+        await send_math_captcha(bot, message.chat.id, db_user, state)
         return
 
+    # 2. Капча пройдена, проверяем указан ли город
     if not db_user.city:
         await delete_user_message(message)
         await state.clear()
@@ -93,6 +142,7 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
         )
         return
 
+    # 3. Пользователь верифицирован и город выбран — открываем магазин
     await delete_user_message(message)
     await state.clear()
 
@@ -101,37 +151,7 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
         if payload.startswith("ref") and payload[3:].isdigit():
             await attach_referrer(session, db_user, int(payload[3:]))
 
-    try:
-        await bot.send_sticker(
-            chat_id=message.chat.id,
-            sticker=get_start_sticker_id(),
-            reply_markup=get_game_reply_kb(),
-        )
-    except Exception as exc:
-        logger = __import__("logging").getLogger(__name__)
-        logger.debug("Failed to send startup sticker: %s", exc)
-        await bot.send_message(
-            chat_id=message.chat.id,
-            text="🍭",
-            reply_markup=get_game_reply_kb(),
-        )
-
-    banner = get_main_banner()
-    if banner:
-        await bot.send_photo(
-            chat_id=message.chat.id,
-            photo=banner,
-            caption=None,
-            reply_markup=get_main_menu_kb(db_user),
-        )
-    else:
-        await bot.send_message(
-            chat_id=message.chat.id,
-            text="🍭 <b>Главное меню</b>",
-            parse_mode="HTML",
-            reply_markup=get_main_menu_kb(db_user),
-            disable_web_page_preview=True,
-        )
+    await show_verified_main_menu(message, db_user, state, bot)
 
 
 @router.message(F.text.in_({"🛟 Тех. Поддержка", "💸 Работа без залога"}))
