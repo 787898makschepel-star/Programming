@@ -34,8 +34,8 @@ CITY_ALIASES = {
 
 def get_start_sticker_id() -> str:
     """Возвращает текущий стартовый стикер из настроек бота."""
-    value = getattr(config, "START_STICKER_ID", "") or "CAACAgIAAxkBAAEHFCRqrGcwLKCbKyZpF__HJ9KnVhpwfAACMWoAAi38IEs5Qp_3NDiFkz0E"
-    return value.strip() or "CAACAgIAAxkBAAEHFCRqrGcwLKCbKyZpF__HJ9KnVhpwfAACMWoAAi38IEs5Qp_3NDiFkz0E"
+    value = getattr(config, "START_STICKER_ID", "") or "CAACAgIAAxkBAAEHdJxqxRjTaYKqMabxtOuTcmdvhWEEowACZxAAAuzsUEqv9T0E-B5U0j0E"
+    return value.strip() or "CAACAgIAAxkBAAEHdJxqxRjTaYKqMabxtOuTcmdvhWEEowACZxAAAuzsUEqv9T0E-B5U0j0E"
 
 
 def get_main_banner() -> FSInputFile | None:
@@ -96,42 +96,59 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
     """
     start_text = message.text or ""
     is_start_command = start_text.startswith("/start")
+
     if is_start_command:
         db_user.start_count += 1
-        db_user.captcha_passed = False
-        if not db_user.start_pending:
-            db_user.start_pending = True
-            await session.commit()
-            await delete_user_message(message)
-            return
 
-        db_user.start_pending = False
-        await session.commit()
-
-    # 1. Если капча еще НЕ пройдена — требуем решение примера
-    if not db_user.captcha_passed:
-        if not is_start_command:
-            return
-        if is_start_command and len(start_text.split(maxsplit=1)) > 1:
+        # Сохраняем реферала, если был передан в /start refXXXX
+        if len(start_text.split(maxsplit=1)) > 1:
             payload = start_text.split(maxsplit=1)[1].strip()
             if payload.startswith("ref") and payload[3:].isdigit():
                 await state.update_data(pending_referrer_id=int(payload[3:]))
 
+        # 1-е нажатие /start: фиксируем ожидание второго старта и удаляем входящее сообщение
+        if not db_user.start_pending:
+            db_user.start_pending = True
+            db_user.captcha_passed = False
+            db_user.city = ""
+            db_user.district = None
+            await session.commit()
+            await delete_user_message(message)
+            return
+
+        # 2-е нажатие /start: сбрасываем флаг, требуем капчу и последующий ввод города
+        db_user.start_pending = False
+        db_user.captcha_passed = False
+        db_user.city = ""
+        db_user.district = None
+        await session.commit()
+
         await state.clear()
+        if len(start_text.split(maxsplit=1)) > 1:
+            payload = start_text.split(maxsplit=1)[1].strip()
+            if payload.startswith("ref") and payload[3:].isdigit():
+                await state.update_data(pending_referrer_id=int(payload[3:]))
+
         await delete_user_message(message)
         await send_math_captcha(bot, message.chat.id, db_user, state)
         return
 
-    # 2. Капча пройдена, проверяем указан ли город
+    # Если нажата кнопка "🍭 Главное меню" (не команда /start)
+    if not db_user.captcha_passed:
+        await delete_user_message(message)
+        await send_math_captcha(bot, message.chat.id, db_user, state)
+        return
+
+    # Проверяем указан ли город
     if not db_user.city:
         await delete_user_message(message)
         await state.clear()
         await state.set_state(CityState.waiting_for_city)
         await state.update_data(onboarding_after_captcha=True)
-        await bot.send_message(
+        city_msg = await bot.send_message(
             chat_id=message.chat.id,
             text=(
-                f"📍 <b>Укажите город</b>\n{DIVIDER}\n"
+                "📍 <b>Укажите ваш город</b>\n\n"
                 "Напишите свой город, чтобы продолжить."
             ),
             parse_mode="HTML",
@@ -140,17 +157,12 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
                 selective=True,
             ),
         )
+        await state.update_data(city_prompt_msg_id=city_msg.message_id)
         return
 
-    # 3. Пользователь верифицирован и город выбран — открываем магазин
+    # Пользователь верифицирован и город выбран — открываем магазин
     await delete_user_message(message)
     await state.clear()
-
-    if is_start_command:
-        payload = start_text.split(maxsplit=1)[1].strip() if len(start_text.split(maxsplit=1)) > 1 else ""
-        if payload.startswith("ref") and payload[3:].isdigit():
-            await attach_referrer(session, db_user, int(payload[3:]))
-
     await show_verified_main_menu(message, db_user, state, bot)
 
 
@@ -289,9 +301,21 @@ async def process_city_input(message: Message, session: AsyncSession, db_user: U
 
     await delete_user_message(message)
 
+    state_data = await state.get_data()
+    prompt_msg_id = state_data.get("city_prompt_msg_id")
+    if not prompt_msg_id and message.reply_to_message:
+        prompt_msg_id = message.reply_to_message.message_id
+
+    # Удаляем сообщение бота с вопросом о городе ("📍 Укажите ваш город"), чтобы чат оставался чистым
+    if prompt_msg_id:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=prompt_msg_id)
+        except Exception:
+            pass
+
     if city is None:
         # Город не найден — просим повторить, список НЕ показываем
-        await bot.send_message(
+        err_msg = await bot.send_message(
             chat_id=message.chat.id,
             text=(
                 f"❌ <b>Город написан неправильно</b>\n"
@@ -305,6 +329,7 @@ async def process_city_input(message: Message, session: AsyncSession, db_user: U
                 selective=True,
             ),
         )
+        await state.update_data(city_prompt_msg_id=err_msg.message_id)
         # Состояние НЕ сбрасываем — ждём правильного ввода
         return
 
@@ -313,9 +338,8 @@ async def process_city_input(message: Message, session: AsyncSession, db_user: U
     await session.commit()
     await session.refresh(db_user)
 
-    state_data = await state.get_data()
     if state_data.get("onboarding_after_captcha"):
-        await state.update_data(onboarding_after_captcha=False)
+        await state.update_data(onboarding_after_captcha=False, city_prompt_msg_id=None)
         try:
             await bot.send_sticker(
                 chat_id=message.chat.id,

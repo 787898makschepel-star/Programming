@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     ADMIN_IDS: List[int] = []
     DB_URL: str = "sqlite+aiosqlite:///data/bot.db"
     
-    START_STICKER_ID: str = "CAACAgIAAxkBAAEHFCRqrGcwLKCbKyZpF__HJ9KnVhpwfAACMWoAAi38IEs5Qp_3NDiFkz0E"
+    START_STICKER_ID: str = "CAACAgIAAxkBAAEHdJxqxRjTaYKqMabxtOuTcmdvhWEEowACZxAAAuzsUEqv9T0E-B5U0j0E"
     BUTTON_EMOJI_ID: str = "5404573776253825754"
     BUTTON_LABELS: str = "{}"
     BUTTON_EMOJI_IDS: str = "{}"

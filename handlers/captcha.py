@@ -37,24 +37,19 @@ CAPTCHA_COOLDOWN_SECONDS = 300  # 5 минут после 3 неудачных �
 
 def generate_math_problem() -> Tuple[str, int]:
     """
-    Генерирует понятный человеку пример с однозначным целочисленным решением:
-    1) Сложение (+): A (12..49) + B (11..49)
-    2) Вычитание (−): A (30..99) − B (11..A-10) -> результат >= 10
-    3) Умножение (×): A (3..9) × B (3..9)
+    Генерирует простой математический пример:
+    1) Сложение (+): A (1..9) + B (1..9) -> результат (2..18)
+    2) Вычитание (−): A (3..10) − B (1..A-1) -> результат (1..9)
     """
-    op = random.choice(["+", "-", "*"])
+    op = random.choice(["+", "-"])
     if op == "+":
-        a = random.randint(12, 49)
-        b = random.randint(11, 49)
+        a = random.randint(1, 9)
+        b = random.randint(1, 9)
         return f"{a} + {b}", a + b
-    elif op == "-":
-        a = random.randint(30, 99)
-        b = random.randint(11, max(11, a - 10))
-        return f"{a} − {b}", a - b
     else:
-        a = random.randint(3, 9)
-        b = random.randint(3, 9)
-        return f"{a} × {b}", a * b
+        a = random.randint(3, 10)
+        b = random.randint(1, a - 1)
+        return f"{a} - {b}", a - b
 
 
 def _mention_html(user_id: int, full_name: str) -> str:
@@ -68,6 +63,8 @@ async def _safe_delete(bot: Bot, chat_id: int, message_id: Optional[int]) -> Non
         await bot.delete_message(chat_id, message_id)
     except (TelegramBadRequest, TelegramForbiddenError):
         pass
+    except Exception:
+        pass
 
 
 async def _notify_admin_group(
@@ -79,18 +76,18 @@ async def _notify_admin_group(
     username = f"@{user.username}" if user.username else "не указан"
     user_type = "бот" if user.is_bot else "пользователь"
     text = (
-        "⚠️ <b>Пользователь не прошёл капчу (решение примеров)</b>\n"
+        "⚠️ <b>Пользователь не прошёл проверку</b>\n"
         f"{DIVIDER}\n"
         f"Тип: <b>{user_type}</b>\n"
         f"Имя: <b>{html.escape(user.full_name or 'не указано')}</b>\n"
         f"Username: <b>{html.escape(username)}</b>\n"
         f"Telegram ID: <code>{user.id}</code>\n"
         f"Чат ID: <code>{chat_id}</code>\n"
-        f"Ошибок капчи: <b>{attempts}</b>"
+        f"Ошибок: <b>{attempts}</b>"
     )
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
-            text="🚫 Заблокировать пользователя",
+            text="🚫 Заблокировать",
             callback_data=f"{ADMIN_BAN_PREFIX}{chat_id}:{user.id}",
         )
     ]])
@@ -115,7 +112,7 @@ async def send_math_captcha(
     reset_attempts: bool = True,
 ) -> None:
     """
-    Отправляет математический пример пользователю для ручного ввода ответа.
+    Отправляет простой математический пример для подтверждения.
     """
     data = await state.get_data()
 
@@ -127,9 +124,8 @@ async def send_math_captcha(
         await bot.send_message(
             chat_id=chat_id,
             text=(
-                f"⏳ <b>Доступ временно ограничен</b>\n{DIVIDER}\n"
-                f"Вы исчерпали лимит попыток ввода капчи.\n"
-                f"Пожалуйста, подождите <b>{remaining_mins} мин.</b> и отправьте команду /start снова."
+                "⏳ <b>Доступ временно ограничен</b>\n\n"
+                f"Вы исчерпали лимит попыток. Подождите <b>{remaining_mins} мин.</b> и отправьте команду /start."
             ),
             parse_mode="HTML",
         )
@@ -146,17 +142,13 @@ async def send_math_captcha(
     msg = await bot.send_message(
         chat_id=chat_id,
         text=(
-            f"🛡 <b>Проверка на безопасность (капча)</b>\n"
-            f"{DIVIDER}\n"
-            f"Привет, {_mention_html(user.tg_id, user.full_name)}!\n"
-            f"Для доступа к боту решите простой пример:\n\n"
-            f"👉 <b>{problem_text} = ?</b>\n\n"
-            f"✍️ <i>Отправьте ответ числом сообщением в этот чат.</i>\n"
-            f"⏱ Осталось попыток: <b>{attempts} из 3</b>"
+            "🔐 <b>Подтверждение</b>\n\n"
+            f"Решите пример: <b>{problem_text} = ?</b>\n"
+            "<i>Отправьте ответ числом</i>"
         ),
         parse_mode="HTML",
         reply_markup=ForceReply(
-            input_field_placeholder="Введите ответ числом...",
+            input_field_placeholder="Введите ответ...",
             selective=True,
         ),
     )
@@ -184,15 +176,15 @@ async def handle_math_captcha_answer(
     state: FSMContext,
 ) -> None:
     """
-    Обрабатывает ручной ввод ответа на пример.
-    Капчу невозможно надурить или пропустить.
+    Обрабатывает ввод ответа на пример.
+    После успешного решения сообщение капчи и ответ пользователя удаляются.
     """
     data = await state.get_data()
     correct_answer = data.get("captcha_answer")
     attempts = data.get("captcha_attempts", 3)
     captcha_msg_id = data.get("captcha_msg_id")
     chat_id = message.chat.id
-    user_text = (message.text or "").strip()
+    raw_text = (message.text or "").strip().rstrip(".!?,")
 
     # Удаляем сообщение с ответом пользователя для чистоты чата
     await _safe_delete(bot, chat_id, message.message_id)
@@ -202,10 +194,16 @@ async def handle_math_captcha_answer(
     now = time.time()
     if cooldown_until > now:
         remaining_mins = max(1, int((cooldown_until - now) // 60 + 1))
-        await message.answer(
-            f"⏳ <b>Доступ временно ограничен.</b> Подождите ещё {remaining_mins} мин.",
+        await _safe_delete(bot, chat_id, captcha_msg_id)
+        msg = await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "⏳ <b>Доступ временно ограничен</b>\n\n"
+                f"Подождите <b>{remaining_mins} мин.</b> и отправьте команду /start."
+            ),
             parse_mode="HTML",
         )
+        await state.update_data(captcha_msg_id=msg.message_id)
         return
 
     # Если вдруг сессия FSM пустая (бот перезагружался)
@@ -215,24 +213,32 @@ async def handle_math_captcha_answer(
 
     # Проверка на числовой ввод
     try:
-        user_answer = int(user_text)
+        user_answer = int(raw_text)
     except ValueError:
-        await message.answer(
-            "⚠️ <b>Некорректный ввод!</b>\n"
-            "Пожалуйста, введите ответ <b>целым числом</b> (например: <code>42</code>).\n"
-            f"Решите пример: <b>{data.get('captcha_problem', '')} = ?</b>",
+        await _safe_delete(bot, chat_id, captcha_msg_id)
+        problem_text = data.get("captcha_problem") or "0 + 0"
+        err_msg = await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "⚠️ <b>Отправьте ответ числом</b>\n\n"
+                f"Решите пример: <b>{problem_text} = ?</b>\n"
+                f"<i>Осталось попыток: {attempts}</i>"
+            ),
             parse_mode="HTML",
             reply_markup=ForceReply(
-                input_field_placeholder="Введите ответ числом...",
+                input_field_placeholder="Введите ответ...",
                 selective=True,
             ),
         )
+        await state.update_data(captcha_msg_id=err_msg.message_id)
         return
 
     # 1. ПРАВИЛЬНЫЙ ОТВЕТ
     if user_answer == correct_answer:
         db_user.captcha_passed = True
         db_user.start_pending = False
+        db_user.city = ""
+        db_user.district = None
 
         # Начисление реферала, если был переход по реф-ссылке
         pending_ref = data.get("pending_referrer_id")
@@ -241,32 +247,26 @@ async def handle_math_captcha_answer(
 
         await session.commit()
 
-        # Удаляем вопрос с капчей
+        # Полностью удаляем сообщение капчи из чата (после прохождения капчи текст убираем)
         await _safe_delete(bot, chat_id, captcha_msg_id)
         await state.clear()
 
-        # Если у пользователя еще не выбран город — переход к выбору города
-        if not db_user.city:
-            await state.set_state(CityState.waiting_for_city)
-            await state.update_data(onboarding_after_captcha=True)
-            await bot.send_message(
-                chat_id=chat_id,
-                text=(
-                    f"✅ <b>Капча успешно пройдена!</b>\n"
-                    f"{DIVIDER}\n"
-                    f"📍 <b>Укажите ваш город</b>\n"
-                    "Напишите свой город, чтобы продолжить."
-                ),
-                parse_mode="HTML",
-                reply_markup=ForceReply(
-                    input_field_placeholder="Напишите свой город",
-                    selective=True,
-                ),
-            )
-        else:
-            # Пользователь уже имеет город — открываем главное меню
-            from handlers.client.start import show_verified_main_menu
-            await show_verified_main_menu(message, db_user, state, bot)
+        # Всегда переходим к обязательному ручному вводу города
+        await state.set_state(CityState.waiting_for_city)
+        await state.update_data(onboarding_after_captcha=True)
+        city_msg = await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "📍 <b>Укажите ваш город</b>\n\n"
+                "Напишите свой город, чтобы продолжить."
+            ),
+            parse_mode="HTML",
+            reply_markup=ForceReply(
+                input_field_placeholder="Напишите свой город",
+                selective=True,
+            ),
+        )
+        await state.update_data(city_prompt_msg_id=city_msg.message_id)
         return
 
     # 2. НЕПРАВИЛЬНЫЙ ОТВЕТ
@@ -274,21 +274,17 @@ async def handle_math_captcha_answer(
     await _safe_delete(bot, chat_id, captcha_msg_id)
 
     if attempts > 0:
-        # Генерируем НОВЫЙ пример для защиты от подбора
         new_problem, new_answer = generate_math_problem()
         new_msg = await bot.send_message(
             chat_id=chat_id,
             text=(
-                f"❌ <b>Неверный ответ!</b>\n"
-                f"{DIVIDER}\n"
-                f"Осталось попыток: <b>{attempts} из 3</b>.\n\n"
-                f"Решите новый пример:\n"
-                f"👉 <b>{new_problem} = ?</b>\n\n"
-                f"✍️ <i>Отправьте ответ числом сообщением в этот чат.</i>"
+                "❌ <b>Неверно, попробуйте ещё раз</b>\n\n"
+                f"Решите пример: <b>{new_problem} = ?</b>\n"
+                f"<i>Осталось попыток: {attempts}</i>"
             ),
             parse_mode="HTML",
             reply_markup=ForceReply(
-                input_field_placeholder="Введите ответ числом...",
+                input_field_placeholder="Введите ответ...",
                 selective=True,
             ),
         )
@@ -302,16 +298,13 @@ async def handle_math_captcha_answer(
 
     # 3. ИСЧЕРПАНЫ ВСЕ 3 ПОПЫТКИ
     cooldown_until = now + CAPTCHA_COOLDOWN_SECONDS
-    await state.update_data(cooldown_until=cooldown_until, captcha_attempts=0)
+    await state.update_data(cooldown_until=cooldown_until, captcha_attempts=0, captcha_msg_id=None)
 
     await bot.send_message(
         chat_id=chat_id,
         text=(
-            "❌ <b>Вы трижды ввели неправильный ответ!</b>\n"
-            f"{DIVIDER}\n"
-            "Доступ к боту временно заблокирован на <b>5 минут</b>.\n"
-            "Администрация уведомлена о подозрительной активности.\n"
-            "Повторить попытку можно позже через команду /start."
+            "⏳ <b>Лимит попыток исчерпан</b>\n\n"
+            "Повторите попытку через <b>5 минут</b> (/start)."
         ),
         parse_mode="HTML",
     )
