@@ -39,7 +39,8 @@ def generate_math_problem() -> Tuple[str, int]:
     """
     Генерирует простой математический пример:
     1) Сложение (+): A (1..9) + B (1..9) -> результат (2..18)
-    2) Вычитание (−): A (3..10) − B (1..A-1) -> результат (1..9)
+    2) Вычитание (−): A (2..9) − B (1..A-1) -> результат (1..8)
+    Оба операнда являются однозначными цифрами от 1 до 9.
     """
     op = random.choice(["+", "-"])
     if op == "+":
@@ -47,7 +48,7 @@ def generate_math_problem() -> Tuple[str, int]:
         b = random.randint(1, 9)
         return f"{a} + {b}", a + b
     else:
-        a = random.randint(3, 10)
+        a = random.randint(2, 9)
         b = random.randint(1, a - 1)
         return f"{a} - {b}", a - b
 

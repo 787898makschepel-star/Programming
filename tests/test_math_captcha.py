@@ -27,7 +27,8 @@ def test_generate_math_problem_ranges_and_answers():
             parts = clean.split("-")
             a, b = int(parts[0].strip()), int(parts[1].strip())
             assert a - b == answer
-            assert 3 <= a <= 10
+            assert 2 <= a <= 9
+            assert 1 <= b <= 9
             assert 1 <= b < a
             assert answer >= 1
 
