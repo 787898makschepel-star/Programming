@@ -99,7 +99,7 @@ MANUAL_CRYPTO_METHODS = {
 
 @router.callback_query(F.data.startswith("topup_manual_"))
 async def show_manual_crypto_screen(call: CallbackQuery, state: FSMContext):
-    """Шаг 1: Запрашивает желаемую сумму пополнения в USDT перед показом реквизитов."""
+    """Показывает реквизиты выбранной сети для ручной проверки платежа."""
     method_key = parse_callback_suffix(call.data, "topup_manual_")
     if not method_key:
         await call.answer("Способ оплаты временно недоступен.", show_alert=True)
@@ -114,7 +114,7 @@ async def show_manual_crypto_screen(call: CallbackQuery, state: FSMContext):
     wallet = getattr(config, wallet_setting)
     rate = await get_usdt_rub_rate()
 
-    await state.set_state(CryptoTxState.waiting_for_usdt_amount)
+    await state.set_state(CryptoTxState.waiting_for_receipt)
     await state.update_data(
         method_key=method_key,
         title=title,
@@ -129,91 +129,19 @@ async def show_manual_crypto_screen(call: CallbackQuery, state: FSMContext):
         f"💳 <b>Пополнение баланса · {title}</b>\n"
         f"{DIVIDER}\n"
         f"🌐 Сеть: <code>{network}</code>\n"
+        f"💰 Валюта: <code>{currency}</code>\n"
         f"📈 Актуальный курс: <b>1 USDT ≈ {rate:.2f} ₽</b>\n\n"
-        f"✍️ <b>Введите сумму пополнения в USDT</b> (например: <code>50</code>):"
-    )
-    await send_or_edit_screen(
-        call,
-        caption,
-        reply_markup=get_usdt_amount_input_kb(),
-        photo=get_main_banner(),
-        state=state,
-    )
-    await call.answer()
-
-
-@router.message(CryptoTxState.waiting_for_usdt_amount, F.text)
-async def process_usdt_amount_input(message: Message, state: FSMContext, bot: Bot):
-    """Шаг 2: Принимает сумму в USDT, производит расчет в рублях и выдает реквизиты кошелька."""
-    raw_text = (message.text or "").strip().replace(" ", "").replace(",", ".")
-    clean_val = re.sub(r"[usdt$]", "", raw_text, flags=re.IGNORECASE)
-    try:
-        usdt_amount = float(clean_val)
-        if usdt_amount <= 0:
-            raise ValueError()
-    except ValueError:
-        await message.answer("⚠️ Пожалуйста, введите корректное число USDT (например: <code>50</code> или <code>25.5</code>).")
-        return
-
-    await delete_user_message(message)
-    data = await state.get_data()
-    title = data.get("title", "USDT")
-    network = data.get("network", "TRC20 / BEP20")
-    wallet = data.get("wallet", "")
-    rate = await get_usdt_rub_rate()
-    rub_amount = round(usdt_amount * rate, 2)
-
-    await state.update_data(
-        usdt_amount=usdt_amount,
-        rub_amount=rub_amount,
-        current_rate=rate,
-    )
-    await state.set_state(CryptoTxState.waiting_for_receipt)
-
-    caption = (
-        f"💳 <b>Пополнение баланса · {title}</b>\n"
-        f"{DIVIDER}\n"
-        f"🌐 Сеть перевода: <code>{network}</code>\n"
-        f"💵 Сумма к отправке: <b>{usdt_amount:g} USDT</b>\n"
-        f"📈 Курс фиксации: <b>1 USDT = {rate:.2f} ₽</b>\n"
-        f"💰 К зачислению на баланс: <b>{rub_amount:,.2f} ₽</b>\n\n"
-        f"📋 <b>Адрес кошелька</b> (нажмите для копирования):\n"
+        f"📋 <b>Адрес для перевода</b> (нажмите, чтобы скопировать):\n"
         f"<code>{wallet}</code>\n\n"
-        f"⚠️ Отправляйте <b>только USDT ({network})</b>.\n\n"
-        f"1. Переведите <b>{usdt_amount:g} USDT</b> на адрес выше.\n"
-        f"2. <b>Пришлите сюда фото/скриншот чека</b> об оплате.\n"
-        f"3. После проверки администратором вам на баланс будет зачислено <b>{rub_amount:,.2f} ₽</b>."
-    )
-    await send_or_edit_screen(
-        message,
-        caption,
-        reply_markup=get_crypto_receipt_waiting_kb(),
-        photo=get_main_banner(),
-        state=state,
-        bot=bot
-    )
-
-
-@router.callback_query(F.data == "change_usdt_amount")
-async def cb_change_usdt_amount(call: CallbackQuery, state: FSMContext):
-    """Позволяет клиенту изменить введенную сумму USDT."""
-    data = await state.get_data()
-    title = data.get("title", "USDT")
-    network = data.get("network", "TRC20 / BEP20")
-    rate = await get_usdt_rub_rate()
-
-    await state.set_state(CryptoTxState.waiting_for_usdt_amount)
-    caption = (
-        f"💳 <b>Пополнение баланса · {title}</b>\n"
-        f"{DIVIDER}\n"
-        f"🌐 Сеть: <code>{network}</code>\n"
-        f"📈 Актуальный курс: <b>1 USDT ≈ {rate:.2f} ₽</b>\n\n"
-        f"✍️ <b>Введите новую сумму пополнения в USDT</b> (например: <code>100</code>):"
+        f"⚠️ Отправляйте <b>только USDT</b> через указанную сеть. Перевод в другой сети или другой монеты может быть потерян.\n\n"
+        f"1. Отправьте нужную сумму на адрес выше.\n"
+        f"2. Ответным сообщением пришлите фото/скриншот чека об оплате или TxID.\n"
+        f"3. После проверки администратор подтвердит поступление и начислит рубли на ваш баланс."
     )
     await send_or_edit_screen(
         call,
         caption,
-        reply_markup=get_usdt_amount_input_kb(),
+        reply_markup=get_crypto_wallet_kb(),
         photo=get_main_banner(),
         state=state,
     )

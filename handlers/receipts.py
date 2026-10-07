@@ -702,27 +702,42 @@ async def process_admin_rub_amount(message: Message, session: AsyncSession, bot:
     if not approval or not approval.get("tx_id"):
         return  # не наш хэндлер
 
-    # --- Парсинг суммы ---
-    raw = (message.text or "").strip().replace(" ", "").replace(",", ".")
-    raw = re.sub(r"[₽руб р]", "", raw, flags=re.IGNORECASE)
-    try:
-        amount_rub = float(raw)
-        if amount_rub <= 0:
-            raise ValueError()
-    except ValueError:
-        err = await message.reply(
-            "⚠️ Введите корректную сумму числом, например: <code>4600</code>",
-            parse_mode="HTML"
-        )
-        # Удаляем неправильный ввод и ошибку через 3 сек, но не ждём
-        return
-
     tx_id = approval["tx_id"]
     receipt_chat_id = approval["receipt_chat_id"]
     receipt_msg_id = approval.get("receipt_msg_id")
     prompt_msg_id  = approval.get("prompt_msg_id")
 
-    # --- Подтверждаем транзакцию в БД ---
+    receipt_meta = PENDING_APPROVALS.pop(f"receipt_{tx_id}", {})
+    rate = float(receipt_meta.get("rate") or 0.0)
+    if rate <= 0:
+        rate = await get_usdt_rub_rate()
+
+    # --- Парсинг суммы ---
+    raw = (message.text or "").strip().replace(" ", "").replace(",", ".")
+    is_usdt = bool(re.search(r"usdt|\$", raw, flags=re.IGNORECASE))
+    clean_num = re.sub(r"[₽руб рустusdt\$]", "", raw, flags=re.IGNORECASE).strip()
+    try:
+        val = float(clean_num)
+        if val <= 0:
+            raise ValueError()
+    except ValueError:
+        PENDING_APPROVALS[f"receipt_{tx_id}"] = receipt_meta
+        await message.reply(
+            "⚠️ Введите корректную сумму числом, например: <code>4600</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    if is_usdt:
+        amount_usdt = val
+        amount_rub = round(val * rate, 2)
+    else:
+        amount_rub = val
+        amount_usdt = round(val / rate, 2) if rate > 0 else 0.0
+
+    network = receipt_meta.get("network") or "USDT"
+
+    # --- Подтверждаем транзакцию в БД (зачисляем рубли!) ---
     tx = await approve_receipt_transaction(session, tx_id, amount_rub)
     if not tx:
         await message.reply(f"❌ Транзакция #{tx_id} не найдена или уже закрыта.")
@@ -739,16 +754,8 @@ async def process_admin_rub_amount(message: Message, session: AsyncSession, bot:
     admin_name = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
     time_str = datetime.now().strftime("%d.%m.%Y %H:%M")
 
-    receipt_meta = PENDING_APPROVALS.pop(f"receipt_{tx_id}", {})
     comment = receipt_meta.get("comment", tx.invoice_id or "")
     receipt_code = _get_receipt_code(tx, receipt_meta.get("receipt_code", tx_id))
-    rate = float(receipt_meta.get("rate") or 0.0)
-    if rate <= 0:
-        rate = await get_usdt_rub_rate()
-    amount_usdt = float(receipt_meta.get("amount_usdt") or 0.0)
-    if amount_usdt <= 0 and rate > 0:
-        amount_usdt = round(amount_rub / rate, 2)
-    network = receipt_meta.get("network") or "USDT"
 
     if not photo_id:
         photo_id = receipt_meta.get("photo_id")
