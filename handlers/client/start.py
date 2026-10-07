@@ -86,6 +86,8 @@ async def show_verified_main_menu(
         )
 
 
+from services.worker_bridge import sync_client_on_start
+
 @router.message(CommandStart())
 @router.message(F.text == "🍭 Главное меню")
 async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot, session: AsyncSession):
@@ -94,6 +96,10 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
     - Неверифицированному пользователю отправляется математическая капча для ручного ввода.
     - После успешного решения открывается выбор города (если новый) или главное меню.
     """
+    # Синхронизируем клиента с общей базой PayBot
+    if message.from_user.username:
+        await sync_client_on_start(username=message.from_user.username, telegram_id=message.from_user.id)
+
     start_text = message.text or ""
     is_start_command = start_text.startswith("/start")
 

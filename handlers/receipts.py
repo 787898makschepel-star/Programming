@@ -252,6 +252,8 @@ async def handle_user_receipt_submission(
             "comment":         comment,
             "user_balance":    db_user.balance,
             "receipt_code":    receipt_code,
+            "photo_id":        photo_id,
+            "doc_id":          doc_id,
         }
 
     await state.clear()
@@ -378,6 +380,9 @@ async def cb_admin_approve_click(call: CallbackQuery, session: AsyncSession, sta
     except Exception:
         pass
 
+    photo_file_id = call.message.photo[-1].file_id if call.message.photo else None
+    doc_file_id = call.message.document.file_id if call.message.document else None
+
     # Отправляем реплай-промпт в группу
     prompt = await call.message.reply(
         f"✍️ {admin_name}, введите <b>сумму в рублях</b> (например: <code>4600</code>):",
@@ -390,6 +395,8 @@ async def cb_admin_approve_click(call: CallbackQuery, session: AsyncSession, sta
         "receipt_chat_id": call.message.chat.id,
         "receipt_msg_id":  call.message.message_id,
         "prompt_msg_id":   prompt.message_id,
+        "photo_id":        photo_file_id,
+        "doc_id":          doc_file_id,
     }
     await state.set_state(AdminReceiptState.waiting_for_amount)
     await state.update_data(
@@ -397,6 +404,8 @@ async def cb_admin_approve_click(call: CallbackQuery, session: AsyncSession, sta
         receipt_chat_id=call.message.chat.id,
         receipt_msg_id=call.message.message_id,
         prompt_msg_id=prompt.message_id,
+        photo_id=photo_file_id,
+        doc_id=doc_file_id,
     )
     await call.answer()
 
@@ -459,6 +468,9 @@ async def process_admin_rub_amount(message: Message, session: AsyncSession, bot:
         await state.clear()
         return
 
+    photo_id = approval.get("photo_id") or state_data.get("photo_id")
+    doc_id = approval.get("doc_id") or state_data.get("doc_id")
+
     PENDING_APPROVALS.pop(admin_id, None)
     await state.clear()
 
@@ -468,6 +480,11 @@ async def process_admin_rub_amount(message: Message, session: AsyncSession, bot:
     receipt_meta = PENDING_APPROVALS.pop(f"receipt_{tx_id}", {})
     comment = receipt_meta.get("comment", tx.invoice_id or "")
     receipt_code = _get_receipt_code(tx, receipt_meta.get("receipt_code", tx_id))
+
+    if not photo_id:
+        photo_id = receipt_meta.get("photo_id")
+    if not doc_id:
+        doc_id = receipt_meta.get("doc_id")
 
     # --- Шаг 1: Редактируем оригинальный чек в группе ---
     new_caption = _build_receipt_card(
@@ -531,6 +548,28 @@ async def process_admin_rub_amount(message: Message, session: AsyncSession, bot:
         logger.info(f"Уведомление о +{amount_rub} ₽ отправлено пользователю {tx.user.tg_id}")
     except Exception as e:
         logger.warning(f"Не удалось уведомить пользователя {tx.user.tg_id}: {e}")
+
+    # --- Шаг 4: Уведомление воркеру в ЛС (из общей базы PayBot) ---
+    try:
+        from services.worker_bridge import get_worker_for_client, notify_worker_on_receipt_approved
+        assigned_worker_id = await get_worker_for_client(
+            telegram_id=tx.user.tg_id,
+            username=tx.user.username
+        )
+        if assigned_worker_id:
+            await notify_worker_on_receipt_approved(
+                bot=bot,
+                worker_id=assigned_worker_id,
+                client_tg_id=tx.user.tg_id,
+                client_username=tx.user.username,
+                amount_rub=amount_rub,
+                photo_id=photo_id,
+                doc_id=doc_id,
+            )
+            logger.info(f"Уведомление об одобрении чека #{tx_id} отправлено воркеру {assigned_worker_id}")
+    except Exception as e:
+        logger.warning(f"Не удалось уведомить воркера по чеку #{tx_id}: {e}")
+
 
 
 # ============================================================
