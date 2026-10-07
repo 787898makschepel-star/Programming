@@ -335,6 +335,23 @@ def get_crypto_wallet_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def get_usdt_amount_input_kb() -> InlineKeyboardMarkup:
+    """Кнопки на этапе ввода суммы USDT."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔁 Выбрать другую сеть", callback_data="topup_crypto_auto"))
+    builder.row(InlineKeyboardButton(text="↩️ В личный кабинет", callback_data="client_profile"))
+    return builder.as_markup()
+
+
+def get_crypto_receipt_waiting_kb() -> InlineKeyboardMarkup:
+    """Кнопки на шаге ожидания чека (когда сумма уже зафиксирована)."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="✏️ Изменить сумму USDT", callback_data="change_usdt_amount"))
+    builder.row(InlineKeyboardButton(text="🔁 Выбрать другую сеть", callback_data="topup_crypto_auto"))
+    builder.row(InlineKeyboardButton(text="🍭 Главное меню", callback_data="to_main_menu"))
+    return builder.as_markup()
+
+
 def get_crypto_networks_kb() -> InlineKeyboardMarkup:
     """Три поддерживаемые сети для USDT-пополнения."""
     builder = InlineKeyboardBuilder()

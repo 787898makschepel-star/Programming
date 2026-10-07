@@ -30,6 +30,7 @@ from states.admin_states import AdminReceiptState
 from utils.ui_cleaner import send_or_edit_screen, delete_user_message
 from utils.formatters import DIVIDER
 from utils.callback_parser import parse_callback_int
+from services.exchange_rate import get_usdt_rub_rate
 
 logger = logging.getLogger(__name__)
 
@@ -72,23 +73,32 @@ def _build_receipt_card(
     time_str: str,
     status: str = "pending",
     amount_rub: float = 0.0,
+    amount_usdt: float = 0.0,
+    rate: float = 0.0,
+    network: str = "USDT",
     admin_name: str = ""
 ) -> str:
-    """Единственный источник разметки карточки чека — используется везде (группа + пользователь)."""
+    """Единственный источник разметки карточки чека — используется в группе чеков и логах."""
     username_str = f"@{user.username}" if user.username else "—"
 
     if status == "pending":
         header = f"🟡 ЗАЯВКА #{receipt_code} · ОЖИДАЕТ"
-        footer = (
-            f"\n\n<i>👆 Нажмите «Подтвердить» и введите сумму в рублях,\n"
-            f"или «Отклонить» для возврата.</i>"
-        )
+        if amount_rub > 0:
+            footer = (
+                f"\n\n<i>👆 Нажмите «✅ Подтвердить ({amount_rub:g} ₽)» для мгновенного зачисления,\n"
+                f"«✏️ Изменить сумму» или «❌ Отклонить».</i>"
+            )
+        else:
+            footer = (
+                f"\n\n<i>👆 Нажмите «✅ Подтвердить» и введите сумму в рублях,\n"
+                f"или «❌ Отклонить» для отмены.</i>"
+            )
         balance_line = f"💳 <b>Баланс до:</b> <code>{user.balance:g} ₽</code>"
     elif status == "approved":
         header = f"✅ ЗАЯВКА #{receipt_code} · ПОДТВЕРЖДЕНА"
         footer = (
             f"\n\n{'─' * 24}\n"
-            f"✅ <b>Зачислено:</b> <code>+{amount_rub:g} ₽</code>\n"
+            f"✅ <b>Зачислено на баланс:</b> <code>+{amount_rub:g} ₽</code>\n"
             f"💳 <b>Новый баланс:</b> <code>{user.balance:g} ₽</code>\n"
             f"👤 <b>Подтвердил:</b> {admin_name}\n"
             f"🕒 <b>Время:</b> {time_str}"
@@ -104,6 +114,21 @@ def _build_receipt_card(
         balance_line = f"💳 <b>Баланс:</b> <code>{user.balance:g} ₽</code>"
 
     city_str = user.city or "—"
+    rate_info = f"📈 <b>Актуальный курс:</b> <code>1 USDT = {rate:.2f} ₽</code>\n" if rate > 0 else ""
+    if amount_usdt > 0 and amount_rub > 0:
+        amounts_block = (
+            f"🌐 <b>Сеть:</b> <code>{network}</code>\n"
+            f"{rate_info}"
+            f"💵 <b>Сумма:</b> <b>{amount_usdt:g} USDT</b> (≈ <b>{amount_rub:,.2f} ₽</b>)\n"
+        )
+    elif amount_rub > 0:
+        amounts_block = (
+            f"{rate_info}"
+            f"💵 <b>Сумма в рублях:</b> <b>{amount_rub:,.2f} ₽</b>\n"
+        )
+    else:
+        amounts_block = f"{rate_info}"
+
     card = (
         f"<b>{'─' * 24}</b>\n"
         f"<b>{header}</b>\n"
@@ -114,18 +139,29 @@ def _build_receipt_card(
         f"🆔 <b>ID:</b> <code>{user.tg_id}</code>\n"
         f"🏙️ <b>Город:</b> <code>{city_str}</code>\n"
         f"{balance_line}\n"
+        f"{amounts_block}"
         f"💬 <b>Комментарий:</b> <code>{comment or '—'}</code>"
         f"{footer}"
     )
     return card
 
 
-def get_admin_receipt_kb(tx_id: int) -> InlineKeyboardMarkup:
-    """Кнопки под чеком в статусе ожидания."""
+def get_admin_receipt_kb(tx_id: int, amount_rub: float = 0.0) -> InlineKeyboardMarkup:
+    """Кнопки под чеком в статусе ожидания с поддержкой 1-клик подтверждения."""
+    if amount_rub > 0:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text=f"✅ Подтвердить ({amount_rub:g} ₽)", callback_data=f"rcpt_quick_{tx_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="✏️ Изменить сумму", callback_data=f"rcpt_app_{tx_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rcpt_rej_{tx_id}"),
+            ]
+        ])
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"rcpt_app_{tx_id}"),
-            InlineKeyboardButton(text="❌ Отклонить",   callback_data=f"rcpt_rej_{tx_id}")
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rcpt_rej_{tx_id}")
         ]
     ])
 
@@ -152,10 +188,14 @@ async def send_receipt_to_group(
     bot: Bot,
     tx: Transaction,
     user: User,
-    receipt_code: int,
+    receipt_code: int | str,
     photo_id: Optional[str] = None,
     doc_id: Optional[str] = None,
-    comment: str = ""
+    comment: str = "",
+    amount_rub: float = 0.0,
+    amount_usdt: float = 0.0,
+    rate: float = 0.0,
+    network: str = "USDT",
 ) -> Optional[tuple[int, int]]:
     """
     Отправляет карточку чека в группу. Возвращает (chat_id, message_id) успешно
@@ -163,8 +203,18 @@ async def send_receipt_to_group(
     """
     target_chat_ids = get_receipts_chat_ids()
     time_str = datetime.now().strftime("%d.%m.%Y %H:%M")
-    caption = _build_receipt_card(receipt_code, user, comment, time_str, status="pending")
-    reply_markup = get_admin_receipt_kb(tx.id)
+    caption = _build_receipt_card(
+        receipt_code=str(receipt_code),
+        user=user,
+        comment=comment,
+        time_str=time_str,
+        status="pending",
+        amount_rub=amount_rub,
+        amount_usdt=amount_usdt,
+        rate=rate,
+        network=network,
+    )
+    reply_markup = get_admin_receipt_kb(tx.id, amount_rub=amount_rub)
 
     for chat_id in target_chat_ids:
         try:
@@ -232,17 +282,49 @@ async def handle_user_receipt_submission(
     # Генерируем 6-значный код заявки (единый для пользователя и группы)
     receipt_code = f"{_gen_receipt_code():06d}"
 
+    state_data = await state.get_data()
+    usdt_amount = float(state_data.get("usdt_amount") or 0.0)
+    rub_amount = float(state_data.get("rub_amount") or 0.0)
+    rate = float(state_data.get("current_rate") or 0.0)
+    network = state_data.get("network") or "USDT"
+
+    # Если сумма не была введена заранее в FSM, попробуем извлечь из текста/комментария
+    if usdt_amount <= 0:
+        match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:usdt|\$)?", comment, re.IGNORECASE)
+        if match:
+            try:
+                parsed_val = float(match.group(1).replace(",", "."))
+                if parsed_val > 0:
+                    usdt_amount = parsed_val
+            except Exception:
+                pass
+
+    if rate <= 0:
+        rate = await get_usdt_rub_rate()
+
+    if usdt_amount > 0 and rub_amount <= 0:
+        rub_amount = round(usdt_amount * rate, 2)
+
     tx = await create_transaction(
         session=session,
         user_id=db_user.id,
-        amount=0.0,
+        amount=rub_amount,
         payment_system="usdt_receipt",
         invoice_id=receipt_code
     )
 
     result = await send_receipt_to_group(
-        bot=bot, tx=tx, user=db_user, receipt_code=receipt_code,
-        photo_id=photo_id, doc_id=doc_id, comment=comment
+        bot=bot,
+        tx=tx,
+        user=db_user,
+        receipt_code=receipt_code,
+        photo_id=photo_id,
+        doc_id=doc_id,
+        comment=comment,
+        amount_rub=rub_amount,
+        amount_usdt=usdt_amount,
+        rate=rate,
+        network=network,
     )
 
     if result:
@@ -254,6 +336,10 @@ async def handle_user_receipt_submission(
             "receipt_code":    receipt_code,
             "photo_id":        photo_id,
             "doc_id":          doc_id,
+            "amount_rub":      rub_amount,
+            "amount_usdt":     usdt_amount,
+            "rate":            rate,
+            "network":         network,
         }
 
     await state.clear()
@@ -299,11 +385,23 @@ async def cb_admin_reject_receipt(call: CallbackQuery, session: AsyncSession, bo
     receipt_meta = PENDING_APPROVALS.get(f"receipt_{tx_id}", {})
     comment = receipt_meta.get("comment", "")
     receipt_code = _get_receipt_code(tx, receipt_meta.get("receipt_code", tx_id))
+    amount_rub = float(receipt_meta.get("amount_rub") or 0.0)
+    amount_usdt = float(receipt_meta.get("amount_usdt") or 0.0)
+    rate = float(receipt_meta.get("rate") or 0.0)
+    network = receipt_meta.get("network") or "USDT"
     time_str = datetime.now().strftime("%d.%m.%Y %H:%M")
 
     new_caption = _build_receipt_card(
-        receipt_code, tx.user, comment, time_str,
-        status="rejected", admin_name=admin_name
+        receipt_code=receipt_code,
+        user=tx.user,
+        comment=comment,
+        time_str=time_str,
+        status="rejected",
+        amount_rub=amount_rub,
+        amount_usdt=amount_usdt,
+        rate=rate,
+        network=network,
+        admin_name=admin_name
     )
 
     # Редактируем карточку чека прямо в группе
@@ -362,7 +460,153 @@ async def cb_admin_reject_receipt(call: CallbackQuery, session: AsyncSession, bo
 
 
 # ============================================================
-# 3. НАЖАТИЕ «ПОДТВЕРДИТЬ» — ЗАПРОС СУММЫ
+# 3. БЫСТРОЕ ПОДТВЕРЖДЕНИЕ В 1 КЛИК (A3)
+# ============================================================
+
+@router.callback_query(F.data.startswith("rcpt_quick_"))
+async def cb_admin_quick_approve(call: CallbackQuery, session: AsyncSession, bot: Bot):
+    """
+    Быстрое подтверждение чека в 1 клик на рассчитанную сумму в рублях (A3).
+    Зачисляет рубли на баланс клиента и обновляет карточку в группе.
+    """
+    admin_user = await get_user_by_tg_id(session, call.from_user.id)
+    if call.from_user.id not in config.ADMIN_IDS and not (admin_user and admin_user.is_admin):
+        await call.answer("⛔️ Нет прав.", show_alert=True)
+        return
+
+    tx_id = parse_callback_int(call.data, "rcpt_quick_")
+    if tx_id is None:
+        await call.answer("Заявка не найдена.", show_alert=True)
+        return
+
+    tx = await get_transaction_by_id(session, tx_id)
+    if not tx:
+        await call.answer("Заявка не найдена.", show_alert=True)
+        return
+    if tx.status == PaymentStatus.SUCCESS:
+        await call.answer("⚠️ Этот чек уже подтверждён!", show_alert=True)
+        return
+
+    receipt_meta = PENDING_APPROVALS.pop(f"receipt_{tx_id}", {})
+    amount_rub = float(receipt_meta.get("amount_rub") or 0.0)
+    amount_usdt = float(receipt_meta.get("amount_usdt") or 0.0)
+    rate = float(receipt_meta.get("rate") or 0.0)
+    network = receipt_meta.get("network") or "USDT"
+    comment = receipt_meta.get("comment", tx.invoice_id or "")
+    photo_id = receipt_meta.get("photo_id")
+    doc_id = receipt_meta.get("doc_id")
+
+    if amount_rub <= 0:
+        await call.answer("⚠️ Сумма не рассчитана автоматически. Нажмите «Изменить сумму».", show_alert=True)
+        return
+
+    # Зачисляем рубли на баланс клиента!
+    tx = await approve_receipt_transaction(session, tx_id, amount_rub)
+    if not tx:
+        await call.answer("Ошибка подтверждения транзакции.", show_alert=True)
+        return
+
+    admin_name = f"@{call.from_user.username}" if call.from_user.username else call.from_user.first_name
+    time_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+    receipt_code = _get_receipt_code(tx, receipt_meta.get("receipt_code", tx_id))
+
+    new_caption = _build_receipt_card(
+        receipt_code=receipt_code,
+        user=tx.user,
+        comment=comment,
+        time_str=time_str,
+        status="approved",
+        amount_rub=amount_rub,
+        amount_usdt=amount_usdt,
+        rate=rate,
+        network=network,
+        admin_name=admin_name
+    )
+
+    # Редактируем карточку чека в группе -1003949748992
+    try:
+        if call.message.photo or call.message.document:
+            await call.message.edit_caption(
+                caption=new_caption,
+                reply_markup=get_confirmed_kb(amount_rub),
+                parse_mode="HTML"
+            )
+        else:
+            await call.message.edit_text(
+                text=new_caption,
+                reply_markup=get_confirmed_kb(amount_rub),
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.debug(f"Не удалось обновить карточку чека #{tx_id}: {e}")
+
+    # Уведомление пользователю в ЛС (строго рубли, без упоминания USDT по A5)
+    try:
+        await bot.send_message(
+            chat_id=tx.user.tg_id,
+            text=(
+                f"💸 <b>Заявка #{receipt_code} — баланс пополнен!</b>\n"
+                f"{'─' * 20}\n"
+                f"✅ <b>Сумма:</b> <code>+{amount_rub:g} ₽</code>\n"
+                f"💳 <b>Ваш баланс:</b> <code>{tx.user.balance:g} ₽</code>\n"
+                f"{'─' * 20}\n"
+                f"<i>Средства доступны прямо сейчас — добро пожаловать в каталог!</i>"
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="🍭 Каталог", callback_data="client_catalog"),
+                    InlineKeyboardButton(text="💰 Мой баланс", callback_data="client_profile"),
+                ],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="to_main_menu")]
+            ]),
+            parse_mode="HTML"
+        )
+        logger.info(f"Уведомление о +{amount_rub} ₽ отправлено пользователю {tx.user.tg_id}")
+    except Exception as e:
+        logger.warning(f"Не удалось уведомить пользователя {tx.user.tg_id}: {e}")
+
+    # Уведомление воркеру в PayBot через bridge
+    try:
+        from services.worker_bridge import get_worker_for_client, notify_worker_on_receipt_approved
+        assigned_worker_id = await get_worker_for_client(
+            telegram_id=tx.user.tg_id,
+            username=tx.user.username
+        )
+        if assigned_worker_id:
+            await notify_worker_on_receipt_approved(
+                bot=bot,
+                worker_id=assigned_worker_id,
+                client_tg_id=tx.user.tg_id,
+                client_username=tx.user.username,
+                amount_rub=amount_rub,
+                photo_id=photo_id,
+                doc_id=doc_id,
+                tx_id=tx.id,
+            )
+            logger.info(f"Уведомление об одобрении чека #{tx_id} отправлено воркеру {assigned_worker_id}")
+        else:
+            client_user_str = f"@{tx.user.username}" if tx.user.username else f"ID: <code>{tx.user.tg_id}</code>"
+            unassigned_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👤 Назначить воркера", callback_data=f"asgn_w:{tx.id}")]
+            ])
+            await bot.send_message(
+                chat_id=call.message.chat.id,
+                text=(
+                    f"⚠️ <b>Клиент {client_user_str} не закреплён ни за одним воркером!</b>\n"
+                    f"Чек #{receipt_code} подтверждён на <code>+{amount_rub:g} ₽</code>.\n\n"
+                    f"Нажмите кнопку ниже, чтобы привязать воркера и отправить ему чек с начислением профита:"
+                ),
+                reply_markup=unassigned_kb,
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.warning(f"Не удалось отправить уведомление воркеру: {e}")
+
+    await call.answer(f"✅ Баланс пополнен на +{amount_rub:g} ₽", show_alert=False)
+
+
+# ============================================================
+# 4. НАЖАТИЕ «ПОДТВЕРДИТЬ» / «ИЗМЕНИТЬ СУММУ» — РУЧНОЙ ВВОД
 # ============================================================
 
 @router.callback_query(F.data.startswith("rcpt_app_"))
@@ -498,6 +742,13 @@ async def process_admin_rub_amount(message: Message, session: AsyncSession, bot:
     receipt_meta = PENDING_APPROVALS.pop(f"receipt_{tx_id}", {})
     comment = receipt_meta.get("comment", tx.invoice_id or "")
     receipt_code = _get_receipt_code(tx, receipt_meta.get("receipt_code", tx_id))
+    rate = float(receipt_meta.get("rate") or 0.0)
+    if rate <= 0:
+        rate = await get_usdt_rub_rate()
+    amount_usdt = float(receipt_meta.get("amount_usdt") or 0.0)
+    if amount_usdt <= 0 and rate > 0:
+        amount_usdt = round(amount_rub / rate, 2)
+    network = receipt_meta.get("network") or "USDT"
 
     if not photo_id:
         photo_id = receipt_meta.get("photo_id")
@@ -506,8 +757,16 @@ async def process_admin_rub_amount(message: Message, session: AsyncSession, bot:
 
     # --- Шаг 1: Редактируем оригинальный чек в группе ---
     new_caption = _build_receipt_card(
-        receipt_code, tx.user, comment, time_str,
-        status="approved", amount_rub=amount_rub, admin_name=admin_name
+        receipt_code=receipt_code,
+        user=tx.user,
+        comment=comment,
+        time_str=time_str,
+        status="approved",
+        amount_rub=amount_rub,
+        amount_usdt=amount_usdt,
+        rate=rate,
+        network=network,
+        admin_name=admin_name
     )
     if receipt_msg_id:
         try:
