@@ -565,11 +565,78 @@ async def process_admin_rub_amount(message: Message, session: AsyncSession, bot:
                 amount_rub=amount_rub,
                 photo_id=photo_id,
                 doc_id=doc_id,
+                tx_id=tx.id,
             )
             logger.info(f"Уведомление об одобрении чека #{tx_id} отправлено воркеру {assigned_worker_id}")
     except Exception as e:
         logger.warning(f"Не удалось уведомить воркера по чеку #{tx_id}: {e}")
 
+
+# ============================================================
+# 5. ПЕРЕНОС ЧЕКА В БОТ ПРОФИТОВ (PAYBOT) ВОРКЕРОМ
+# ============================================================
+
+@router.callback_query(F.data.startswith("tr_prf:"))
+async def cb_transfer_receipt_to_profit(call: CallbackQuery, session: AsyncSession):
+    """
+    Обработчик кнопки «💰 Перенести в профит»:
+    Переносит подтверждённый чек в Pay_Bot (Бот Профитов).
+    После нажатия сообщение удаляется (пропадает), воркеру выводится alert.
+    """
+    tx_id = parse_callback_int(call.data, "tr_prf:")
+    if not tx_id:
+        await call.answer("❌ Заявка не найдена.", show_alert=True)
+        return
+
+    tx = await get_transaction_by_id(session, tx_id)
+    if not tx:
+        await call.answer("❌ Заявка не найдена в базе данных.", show_alert=True)
+        return
+
+    # Извлекаем фото / документ из сообщения
+    photo_id = ""
+    if call.message and call.message.photo:
+        photo_id = call.message.photo[-1].file_id
+    elif call.message and call.message.document:
+        photo_id = call.message.document.file_id
+
+    from services.worker_bridge import transfer_receipt_to_profit
+    result = await transfer_receipt_to_profit(
+        worker_tg_id=call.from_user.id,
+        tx_id=tx.id,
+        amount=tx.amount,
+        client_tg_id=tx.user.tg_id,
+        client_username=tx.user.username,
+        photo_id=photo_id,
+    )
+
+    if result["status"] == "not_registered":
+        await call.answer(result["message"], show_alert=True)
+        return
+
+    if result["status"] == "already_transferred":
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await call.answer(result["message"], show_alert=True)
+        return
+
+    if result["status"] == "ok":
+        try:
+            await call.message.delete()
+        except Exception as e:
+            logger.debug(f"Не удалось удалить сообщение с чеком: {e}")
+
+        worker_share = result["worker_share"]
+        await call.answer(
+            f"✅ Профит успешно перенесён в Бот Профитов!\n💰 Начислено на баланс: +{worker_share:g} ₽",
+            show_alert=True
+        )
+        return
+
+    err_msg = result.get("message", "Произошла ошибка при переносе.")
+    await call.answer(f"❌ {err_msg}", show_alert=True)
 
 
 # ============================================================
@@ -579,3 +646,4 @@ async def process_admin_rub_amount(message: Message, session: AsyncSession, bot:
 @router.callback_query(F.data == "noop")
 async def cb_noop(call: CallbackQuery):
     await call.answer()
+
