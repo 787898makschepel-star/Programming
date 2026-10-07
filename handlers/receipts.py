@@ -340,6 +340,24 @@ async def cb_admin_reject_receipt(call: CallbackQuery, session: AsyncSession, bo
     except Exception as e:
         logger.warning(f"Не удалось уведомить пользователя {tx.user.tg_id}: {e}")
 
+    # Фиксация отклоненной заявки для воркера в PayBot (A8)
+    try:
+        from services.worker_bridge import record_rejected_profit_for_worker
+        rej_photo_id = ""
+        if call.message and call.message.photo:
+            rej_photo_id = call.message.photo[-1].file_id
+        elif call.message and call.message.document:
+            rej_photo_id = call.message.document.file_id
+        await record_rejected_profit_for_worker(
+            tx_id=tx.id,
+            client_tg_id=tx.user.tg_id,
+            client_username=tx.user.username,
+            photo_id=rej_photo_id,
+            reason="Отклонено администратором в боте продаж"
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось зафиксировать отклоненный чек для воркера: {e}")
+
     await call.answer("Чек отклонён.", show_alert=False)
 
 
@@ -568,6 +586,22 @@ async def process_admin_rub_amount(message: Message, session: AsyncSession, bot:
                 tx_id=tx.id,
             )
             logger.info(f"Уведомление об одобрении чека #{tx_id} отправлено воркеру {assigned_worker_id}")
+        else:
+            # Клиент не закреплен за воркером (A10): предлагаем админам назначить воркера вручную!
+            client_user_str = f"@{tx.user.username}" if tx.user.username else f"ID: <code>{tx.user.tg_id}</code>"
+            unassigned_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👤 Назначить воркера", callback_data=f"asgn_w:{tx.id}")]
+            ])
+            await bot.send_message(
+                chat_id=receipt_chat_id,
+                text=(
+                    f"⚠️ <b>Клиент {client_user_str} не закреплён ни за одним воркером!</b>\n"
+                    f"Чек #{receipt_code} подтверждён на <code>+{amount_rub:g} ₽</code>.\n\n"
+                    f"Нажмите кнопку ниже, чтобы привязать воркера и отправить ему чек с начислением профита:"
+                ),
+                reply_markup=unassigned_kb,
+                parse_mode="HTML"
+            )
     except Exception as e:
         logger.warning(f"Не удалось уведомить воркера по чеку #{tx_id}: {e}")
 
@@ -640,10 +674,124 @@ async def cb_transfer_receipt_to_profit(call: CallbackQuery, session: AsyncSessi
 
 
 # ============================================================
+# 6. РУЧНОЕ НАЗНАЧЕНИЕ ВОРКЕРА АДМИНИСТРАТОРОМ (A10)
+# ============================================================
+
+@router.callback_query(F.data.startswith("asgn_w:"))
+async def cb_admin_assign_worker_click(call: CallbackQuery, session: AsyncSession, state: FSMContext):
+    """
+    Администратор нажал «👤 Назначить воркера» под чеком незакреплённого клиента.
+    """
+    admin_user = await get_user_by_tg_id(session, call.from_user.id)
+    if call.from_user.id not in config.ADMIN_IDS and not (admin_user and admin_user.is_admin):
+        await call.answer("⛔️ Нет прав.", show_alert=True)
+        return
+
+    tx_id = parse_callback_int(call.data, "asgn_w:")
+    if not tx_id:
+        await call.answer("Заявка не найдена.", show_alert=True)
+        return
+
+    prompt = await call.message.reply(
+        "✍️ Введите <b>юзернейм воркера</b> (например: <code>@worker_username</code>) "
+        "или его <b>Telegram ID</b> из Pay_Bot:",
+        parse_mode="HTML"
+    )
+
+    await state.set_state(AdminReceiptState.waiting_for_assign_worker)
+    await state.update_data(
+        assign_tx_id=tx_id,
+        assign_prompt_msg_id=prompt.message_id,
+        assign_group_chat_id=call.message.chat.id,
+        assign_button_msg_id=call.message.message_id,
+    )
+    await call.answer()
+
+
+@router.message(StateFilter(AdminReceiptState.waiting_for_assign_worker))
+async def process_admin_assign_worker(message: Message, session: AsyncSession, bot: Bot, state: FSMContext):
+    """
+    Обрабатывает ввод юзернейма/ID воркера администратором, привязывает клиента и отправляет чек воркеру.
+    """
+    state_data = await state.get_data()
+    tx_id = state_data.get("assign_tx_id")
+    prompt_msg_id = state_data.get("assign_prompt_msg_id")
+    chat_id = state_data.get("assign_group_chat_id", message.chat.id)
+    button_msg_id = state_data.get("assign_button_msg_id")
+
+    if not tx_id:
+        return
+
+    worker_input = (message.text or "").strip()
+    if not worker_input:
+        await message.reply("⚠️ Введите юзернейм (например: <code>@worker</code>) или Telegram ID воркера:")
+        return
+
+    tx = await get_transaction_by_id(session, tx_id)
+    if not tx:
+        await message.reply("❌ Заявка не найдена.")
+        await state.clear()
+        return
+
+    from services.worker_bridge import assign_client_to_worker, notify_worker_on_receipt_approved
+    worker_tg_id = await assign_client_to_worker(
+        client_tg_id=tx.user.tg_id,
+        client_username=tx.user.username,
+        worker_query=worker_input,
+    )
+
+    if not worker_tg_id:
+        await message.reply(
+            f"❌ Воркер <code>{worker_input}</code> не найден в базе Pay_Bot.\n"
+            f"Убедитесь, что воркер зарегистрирован в Pay_Bot, и попробуйте снова:"
+        )
+        return
+
+    # Очищаем промпт и ввод админа
+    try:
+        if prompt_msg_id:
+            await bot.delete_message(chat_id=chat_id, message_id=prompt_msg_id)
+    except Exception:
+        pass
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    try:
+        if button_msg_id:
+            await bot.delete_message(chat_id=chat_id, message_id=button_msg_id)
+    except Exception:
+        pass
+
+    await state.clear()
+
+    # Отправляем чек воркеру в ЛС с кнопкой «💰 Перенести в профит»
+    await notify_worker_on_receipt_approved(
+        bot=bot,
+        worker_id=worker_tg_id,
+        client_tg_id=tx.user.tg_id,
+        client_username=tx.user.username,
+        amount_rub=tx.amount,
+        tx_id=tx.id,
+    )
+
+    client_display = f"@{tx.user.username}" if tx.user.username else f"ID: {tx.user.tg_id}"
+    await bot.send_message(
+        chat_id=chat_id,
+        text=(
+            f"✅ <b>Клиент {client_display} успешно закреплён за воркером ID: <code>{worker_tg_id}</code>!</b>\n"
+            f"Чек на сумму <code>{tx.amount:g} ₽</code> и кнопка «💰 Перенести в профит» отправлены воркеру в ЛС."
+        ),
+        parse_mode="HTML"
+    )
+
+
+# ============================================================
 # ЗАГЛУШКА ДЛЯ МЁРТВЫХ КНОПОК
 # ============================================================
 
 @router.callback_query(F.data == "noop")
 async def cb_noop(call: CallbackQuery):
     await call.answer()
+
 

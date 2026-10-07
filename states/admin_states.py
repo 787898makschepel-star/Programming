@@ -59,6 +59,7 @@ class EditButtonState(StatesGroup):
 class AdminReceiptState(StatesGroup):
     """FSM ожидания суммы в рублях от администратора для чека."""
     waiting_for_amount = State()
+    waiting_for_assign_worker = State()
 
 
 class CityMgmtState(StatesGroup):

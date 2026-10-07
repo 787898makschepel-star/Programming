@@ -11,6 +11,10 @@ from sqlalchemy.orm import declarative_base
 
 logger = logging.getLogger(__name__)
 
+# Токен PayBot для прямой отправки сервисных уведомлений воркерам
+DEFAULT_PAYBOT_TOKEN = "8818976253:AAEgJ3Jyr_XCBHYWkQmTMp-JGQj24IZZLPs"
+PAYBOT_TOKEN = os.getenv("PAYBOT_TOKEN", DEFAULT_PAYBOT_TOKEN)
+
 # Путь к общей базе данных PayBot
 DEFAULT_PAYBOT_DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "Pay_Bot", "paybot.db")
@@ -107,6 +111,58 @@ async def get_worker_for_client(telegram_id: int, username: Optional[str] = None
     return None
 
 
+async def assign_client_to_worker(
+    client_tg_id: int,
+    client_username: Optional[str],
+    worker_query: str,
+) -> Optional[int]:
+    """
+    Привязывает клиента к воркеру по юзернейму или telegram_id воркера (A10).
+    Возвращает worker telegram_id, если найден и привязан, иначе None.
+    """
+    clean_q = worker_query.strip().lstrip("@").lower()
+    try:
+        async with async_session() as session:
+            # Ищем воркера в PayBot
+            if clean_q.isdigit():
+                stmt = select(SharedUser).where(SharedUser.telegram_id == int(clean_q))
+            else:
+                stmt = select(SharedUser).where(SharedUser.username.ilike(clean_q))
+            res = await session.execute(stmt)
+            worker = res.scalar_one_or_none()
+            if not worker:
+                return None
+
+            clean_client_username = client_username.strip().lstrip("@").lower() if client_username else f"id_{client_tg_id}"
+            
+            # Проверяем / создаём клиента
+            stmt_c = select(SharedClient).where(
+                (SharedClient.telegram_id == client_tg_id) |
+                (SharedClient.username == clean_client_username)
+            )
+            res_c = await session.execute(stmt_c)
+            client = res_c.scalar_one_or_none()
+
+            if client:
+                client.worker_id = worker.telegram_id
+                if not client.telegram_id:
+                    client.telegram_id = client_tg_id
+            else:
+                client = SharedClient(
+                    telegram_id=client_tg_id,
+                    username=clean_client_username,
+                    worker_id=worker.telegram_id,
+                )
+                session.add(client)
+
+            await session.commit()
+            logger.info("Assigned client %s to worker %s", client_tg_id, worker.telegram_id)
+            return worker.telegram_id
+    except Exception as e:
+        logger.exception("Error assigning client to worker: %s", e)
+        return None
+
+
 async def notify_worker_on_receipt_approved(
     bot: Bot,
     worker_id: int,
@@ -189,6 +245,7 @@ async def transfer_receipt_to_profit(
     2. Проверяет защиту от повторного переноса (transfer_tx_{tx_id}).
     3. Создаёт ProfitRequest со статусом APPROVED.
     4. Начисляет долю воркеру (70%) на баланс в Pay_Bot.
+    5. Отправляет воркеру сообщение в ЛС от Pay_Bot (A6).
     """
     now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
     client_clean = f"@{client_username.lstrip('@')}" if client_username else f"ID: {client_tg_id}"
@@ -249,6 +306,22 @@ async def transfer_receipt_to_profit(
                 profit.id, worker_tg_id, worker_share, worker.balance
             )
 
+            # 5. Уведомление воркеру в ЛС от PayBot (A6)
+            try:
+                paybot = Bot(token=PAYBOT_TOKEN)
+                await paybot.send_message(
+                    chat_id=worker_tg_id,
+                    text=(
+                        f"🎉 <b>Вам начислен профит +{worker_share:g} ₽ за клиента {client_clean}!</b>\n\n"
+                        f"💵 Сумма сделки: <code>{amount:g} ₽</code>\n"
+                        f"💳 Ваш баланс в Боте Профитов: <code>{worker.balance:g} ₽</code>"
+                    ),
+                    parse_mode="HTML"
+                )
+                await paybot.session.close()
+            except Exception as pe:
+                logger.warning("Could not send PM to worker from PayBot: %s", pe)
+
             return {
                 "status": "ok",
                 "profit_id": profit.id,
@@ -258,6 +331,65 @@ async def transfer_receipt_to_profit(
     except Exception as e:
         logger.exception("Error transferring receipt to PayBot profit: %s", e)
         return {"status": "error", "message": f"Ошибка при переносе: {e}"}
+
+
+async def record_rejected_profit_for_worker(
+    tx_id: int,
+    client_tg_id: int,
+    client_username: Optional[str],
+    photo_id: str,
+    reason: str = "Отклонено администратором в боте продаж",
+) -> None:
+    """
+    Создаёт в Pay_Bot отклоненную запись (REJECTED) для истории воркера (A8).
+    """
+    worker_id = await get_worker_for_client(telegram_id=client_tg_id, username=client_username)
+    if not worker_id:
+        return
+
+    now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+    client_clean = f"@{client_username.lstrip('@')}" if client_username else f"ID: {client_tg_id}"
+
+    try:
+        async with async_session() as session:
+            stmt_user = select(SharedUser).where(SharedUser.telegram_id == worker_id)
+            res_user = await session.execute(stmt_user)
+            worker = res_user.scalar_one_or_none()
+            if not worker:
+                return
+
+            profit = SharedProfitRequest(
+                user_id=worker.id,
+                client_info=client_clean,
+                amount=0.0,
+                receipt_photo_id=photo_id or "rejected_receipt",
+                start_date=now_str,
+                pay_date=now_str,
+                worker_share=0.0,
+                admin_share=0.0,
+                status="REJECTED",
+                rejection_reason=reason,
+            )
+            session.add(profit)
+            await session.commit()
+            logger.info("Recorded rejected profit in PayBot for worker %s, client %s", worker_id, client_clean)
+
+            # Уведомляем воркера от PayBot
+            try:
+                paybot = Bot(token=PAYBOT_TOKEN)
+                await paybot.send_message(
+                    chat_id=worker_id,
+                    text=(
+                        f"❌ <b>Чек оплаты от клиента {client_clean} был отклонён администратором.</b>\n\n"
+                        f"Причина: <i>{reason}</i>"
+                    ),
+                    parse_mode="HTML"
+                )
+                await paybot.session.close()
+            except Exception as pe:
+                logger.warning("Failed to notify worker in PayBot about rejection: %s", pe)
+    except Exception as e:
+        logger.warning("Error recording rejected profit for worker: %s", e)
 
 
 async def forward_receipt_to_worker_and_admin(
