@@ -29,12 +29,26 @@ async_engine = create_async_engine(
     future=True
 )
 
+from sqlalchemy import event
+
+@event.listens_for(async_engine.sync_engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    """Швейцарские часы: WAL-режим, синхронизация NORMAL, таймаут 60с и внешние ключи."""
+    if config.DB_URL.startswith("sqlite"):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode = WAL")
+        cursor.execute("PRAGMA synchronous = NORMAL")
+        cursor.execute("PRAGMA busy_timeout = 60000")
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.close()
+
 # Фабрика сессий
 async_session_factory = async_sessionmaker(
     bind=async_engine,
     class_=AsyncSession,
     expire_on_commit=False
 )
+
 
 
 class Base(DeclarativeBase):
