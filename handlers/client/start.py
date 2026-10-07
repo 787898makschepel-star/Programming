@@ -112,14 +112,13 @@ async def cmd_start(message: Message, db_user: User, state: FSMContext, bot: Bot
             if payload.startswith("ref") and payload[3:].isdigit():
                 await state.update_data(pending_referrer_id=int(payload[3:]))
 
-        # 1-е нажатие /start: фиксируем ожидание второго старта и удаляем входящее сообщение
+        # 1-е нажатие /start: фиксируем ожидание второго старта (сообщение не удаляем)
         if not db_user.start_pending:
             db_user.start_pending = True
             db_user.captcha_passed = False
             db_user.city = ""
             db_user.district = None
             await session.commit()
-            await delete_user_message(message)
             return
 
         # 2-е нажатие /start: сбрасываем флаг, требуем капчу и последующий ввод города

@@ -362,9 +362,9 @@ def test_cmd_start_requires_two_starts_for_all_users():
             # 1-е нажатие /start
             await cmd_start(msg1, db_user, state, bot, session)
 
-            # Капча НЕ отправляется, start_pending становится True, статус и город сбрасываются
+            # Капча НЕ отправляется, start_pending становится True, первое сообщение /start НЕ удаляется
             mock_send_captcha.assert_not_called()
-            mock_del_msg.assert_called_once_with(msg1)
+            mock_del_msg.assert_not_called()
             assert db_user.start_pending is True
             assert db_user.captcha_passed is False
             assert db_user.city == ""
